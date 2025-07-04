@@ -325,6 +325,10 @@ function initializeApp() {
     renderTabs();
     updateEditor();
     initializePanelResizing();
+    
+    // Initialize database
+    initializeDatabase();
+    
     console.log('App initialized with user:', currentUser);
 }
 
@@ -484,6 +488,119 @@ if __name__ == '__main__':
 Flask-CORS==4.0.0
 Werkzeug==2.3.7`,
         type: 'txt'
+    },
+    'database_example.js': {
+        content: `// HackMate Database Example
+// The database is available as 'db' and is shared across all users
+
+async function databaseDemo() {
+    console.log('=== HackMate Database Demo ===');
+    
+    // Store some data
+    await db.set('username', 'Alice');
+    await db.set('age', 25);
+    await db.set('settings', { theme: 'dark', notifications: true });
+    
+    // Retrieve data
+    const name = await db.get('username');
+    const age = await db.get('age');
+    const settings = await db.get('settings');
+    
+    console.log('Name:', name);
+    console.log('Age:', age);
+    console.log('Settings:', settings);
+    
+    // Work with arrays
+    await db.set('todos', []); // Initialize empty array
+    await db.push('todos', 'Buy groceries');
+    await db.push('todos', 'Walk the dog');
+    await db.push('todos', 'Finish project');
+    
+    const todos = await db.get('todos');
+    console.log('Todo list:', todos);
+    
+    // Increment a counter
+    await db.set('views', 0);
+    await db.increment('views');
+    await db.increment('views', 5);
+    
+    const views = await db.get('views');
+    console.log('Page views:', views);
+    
+    // List all data
+    const allData = await db.list();
+    console.log('All database data:', allData);
+    
+    // Watch for changes (real-time)
+    db.watch('username', (newValue, key) => {
+        console.log(\`User \${key} changed to: \${newValue}\`);
+    });
+    
+    console.log('Database demo complete! Try changing values from another browser tab.');
+}
+
+// Run the demo
+databaseDemo().catch(console.error);
+
+// You can also use these commands in the terminal:
+// db set message "Hello from the database!"
+// db get message
+// db list
+// db help`,
+        type: 'js'
+    },
+    'database_example.py': {
+        content: `# HackMate Database Example (Python)
+# The database is available as 'db' and is shared across all users
+
+import asyncio
+import json
+
+async def database_demo():
+    print('=== HackMate Database Demo (Python) ===')
+    
+    # Store some data
+    await db.set('python_user', 'Bob')
+    await db.set('python_score', 100)
+    await db.set('python_config', {'language': 'python', 'version': '3.11'})
+    
+    # Retrieve data
+    name = await db.get('python_user')
+    score = await db.get('python_score')
+    config = await db.get('python_config')
+    
+    print(f'Python User: {name}')
+    print(f'Score: {score}')
+    print(f'Config: {config}')
+    
+    # Work with arrays
+    await db.set('python_tasks', [])  # Initialize empty array
+    await db.push('python_tasks', 'Learn async/await')
+    await db.push('python_tasks', 'Build a web app')
+    await db.push('python_tasks', 'Deploy to production')
+    
+    tasks = await db.get('python_tasks')
+    print(f'Python tasks: {tasks}')
+    
+    # Increment a counter
+    await db.increment('python_downloads', 10)
+    downloads = await db.get('python_downloads')
+    print(f'Downloads: {downloads}')
+    
+    # List all data
+    all_data = await db.list()
+    print(f'All database data: {all_data}')
+    
+    print('Python database demo complete!')
+
+# Run the demo
+asyncio.create_task(database_demo())
+
+# You can also use these commands in the terminal:
+# db set py_message "Hello from Python!"
+# db get py_message
+# db list`,
+        type: 'python'
     }
 };
 
@@ -541,6 +658,11 @@ sys.stderr = JSConsole()
         pyodideReady = true;
         statusEl.textContent = 'Python Ready';
         statusEl.className = 'python-status ready';
+        
+        // Set up Python database if available
+        if (db) {
+            setupPythonDatabase();
+        }
         
         console.log('Pyodide loaded successfully with Flask support');
     } catch (error) {
@@ -1529,7 +1651,7 @@ async function handleFlaskRequestFromIframe(path, method = 'GET', data = null, h
 
 // Output tab switching
 function switchOutputTab(tab) {
-    const tabs = ['preview', 'console', 'terminal'];
+    const tabs = ['preview', 'console', 'terminal', 'database'];
     
     tabs.forEach(t => {
         const element = document.getElementById(t + '-container') || document.getElementById(t + '-frame');
@@ -1546,6 +1668,11 @@ function switchOutputTab(tab) {
     const activeTab = document.querySelector(`[onclick="switchOutputTab('${tab}')"]`);
     if (activeTab) {
         activeTab.classList.add('active');
+    }
+    
+    // Refresh database when switching to database tab
+    if (tab === 'database') {
+        setTimeout(() => refreshDatabase(), 100);
     }
 }
 
@@ -1941,6 +2068,12 @@ function showTerminalHelp() {
     addToTerminal('  curl <path>              Test Flask routes', 'log');
     addToTerminal('  curl POST <path> <data>  Test POST requests', 'log');
     addToTerminal('', 'log');
+    addToTerminal('Database:', 'info');
+    addToTerminal('  db set <key> <value>     Store data', 'log');
+    addToTerminal('  db get <key>             Retrieve data', 'log');
+    addToTerminal('  db list                  List all data', 'log');
+    addToTerminal('  db help                  Show database help', 'log');
+    addToTerminal('', 'log');
     addToTerminal('General:', 'info');
     addToTerminal('  help                     Show this help message', 'log');
 }
@@ -1962,6 +2095,7 @@ setTimeout(() => {
     addToTerminal('  pip install <package> - install Python packages', 'log');
     addToTerminal('  npm install <package> - install npm packages (simulated)', 'log');
     addToTerminal('  curl [METHOD] <path> [data] - test Flask routes', 'log');
+    addToTerminal('  db <command> - database operations', 'log');
     addToTerminal('  help - show all available commands', 'log');
     addToTerminal('', 'log');
     addToTerminal('Package Management:', 'info');
@@ -2109,6 +2243,8 @@ document.addEventListener('DOMContentLoaded', function() {
                         await listPythonPackages();
                     } else if (command === 'npm list') {
                         listNpmPackages();
+                    } else if (command.startsWith('db ')) {
+                        await handleDatabaseCommand(command);
                     } else if (command === 'help' || command === '--help') {
                         showTerminalHelp();
                     } else {
@@ -2441,7 +2577,7 @@ function initializePanelResizing() {
                     mainContent.style.marginLeft = width + 'px';
                 }
                 
-                // Refresh CodeMirror if it exists
+                // Refresh the editor
                 if (codeMirrorInstance) {
                     setTimeout(() => codeMirrorInstance.refresh(), 10);
                 }
@@ -2456,7 +2592,7 @@ function initializePanelResizing() {
             if (height >= minHeight && height <= maxHeight) {
                 bottomPanel.style.height = height + 'px';
                 
-                // Refresh CodeMirror if it exists
+                // Refresh the editor
                 if (codeMirrorInstance) {
                     setTimeout(() => codeMirrorInstance.refresh(), 10);
                 }
@@ -2509,3 +2645,611 @@ function initializePanelResizing() {
     
     console.log('Panel resizing initialized with draggable handles');
 }
+
+// Basic Database functionality using Gun.js
+class HackMateDB {
+    constructor(roomId) {
+        this.roomId = roomId;
+        this.db = gun.get('hackmate').get(roomId).get('database');
+        console.log('HackMateDB initialized for room:', roomId);
+    }
+
+    // Set a key-value pair
+    async set(key, value) {
+        return new Promise((resolve, reject) => {
+            try {
+                const data = {
+                    value: value,
+                    timestamp: Date.now(),
+                    type: typeof value
+                };
+                this.db.get(key).put(data, (ack) => {
+                    if (ack.err) {
+                        reject(new Error(ack.err));
+                    } else {
+                        console.log(`DB Set: ${key} =`, value);
+                        resolve(value);
+                    }
+                });
+            } catch (error) {
+                reject(error);
+            }
+        });
+    }
+
+    // Get a value by key
+    async get(key) {
+        return new Promise((resolve, reject) => {
+            this.db.get(key).once((data) => {
+                if (data && data.value !== undefined) {
+                    console.log(`DB Get: ${key} =`, data.value);
+                    resolve(data.value);
+                } else {
+                    resolve(null);
+                }
+            });
+        });
+    }
+
+    // Delete a key
+    async delete(key) {
+        return new Promise((resolve, reject) => {
+            this.db.get(key).put(null, (ack) => {
+                if (ack.err) {
+                    reject(new Error(ack.err));
+                } else {
+                    console.log(`DB Delete: ${key}`);
+                    resolve(true);
+                }
+            });
+        });
+    }
+
+    // Get all keys (list all data)
+    async list() {
+        return new Promise((resolve) => {
+            const results = {};
+            this.db.map().once((data, key) => {
+                if (data && data.value !== undefined && key !== '_') {
+                    results[key] = {
+                        value: data.value,
+                        timestamp: data.timestamp,
+                        type: data.type
+                    };
+                }
+            });
+            
+            // Give it a moment to collect all data
+            setTimeout(() => {
+                console.log('DB List:', results);
+                resolve(results);
+            }, 100);
+        });
+    }
+
+    // Add to an array (push)
+    async push(arrayKey, value) {
+        const currentArray = await this.get(arrayKey) || [];
+        if (!Array.isArray(currentArray)) {
+            throw new Error(`Key "${arrayKey}" is not an array`);
+        }
+        currentArray.push(value);
+        return await this.set(arrayKey, currentArray);
+    }
+
+    // Increment a number
+    async increment(key, amount = 1) {
+        const current = await this.get(key) || 0;
+        const newValue = current + amount;
+        return await this.set(key, newValue);
+    }
+
+    // Watch for changes to a key
+    watch(key, callback) {
+        this.db.get(key).on((data) => {
+            if (data && data.value !== undefined) {
+                callback(data.value, key);
+            }
+        });
+    }
+
+    // Simple query functionality
+    async query(filterFn) {
+        const allData = await this.list();
+        const results = {};
+        
+        Object.keys(allData).forEach(key => {
+            const item = allData[key];
+            if (filterFn(item.value, key)) {
+                results[key] = item;
+            }
+        });
+        
+        return results;
+    }
+}
+
+// Initialize database for current room
+let db = null;
+
+function initializeDatabase() {
+    if (roomId) {
+        db = new HackMateDB(roomId);
+        
+        // Make it available globally for user scripts
+        window.db = db;
+        
+        // Add Python database functions
+        if (pyodideReady && pyodide) {
+            setupPythonDatabase();
+        }
+        
+        console.log('Database initialized and available as window.db');
+        addToConsole('Database ready! Use db.set(), db.get(), db.list() in your code', 'info');
+    }
+}
+
+// Python database integration
+function setupPythonDatabase() {
+    if (!pyodide || !db) return;
+    
+    try {
+        pyodide.runPython(`
+import js
+import json
+from pyodide.ffi import to_js, create_proxy
+
+class Database:
+    def __init__(self):
+        self.js_db = js.db
+    
+    def set(self, key, value):
+        """Set a key-value pair in the database"""
+        return self.js_db.set(key, value)
+    
+    def get(self, key):
+        """Get a value by key from the database"""
+        return self.js_db.get(key)
+    
+    def delete(self, key):
+        """Delete a key from the database"""
+        return self.js_db.delete(key)
+    
+    def list(self):
+        """List all data in the database"""
+        return self.js_db.list()
+    
+    def push(self, array_key, value):
+        """Add to array"""
+        return self.js_db.push(array_key, value)
+    
+    def increment(self, key, amount=1):
+        """Increment a numeric value"""
+        return self.js_db.increment(key, amount)
+    
+    def watch(self, key, callback):
+        """Watch for changes to a key"""
+        js_callback = create_proxy(callback)
+        return self.js_db.watch(key, js_callback)
+    
+    def query(self, filter_func):
+        """Simple query with filter function"""
+        js_filter = create_proxy(filter_func)
+        return self.js_db.query(js_filter)
+
+# Make database available in Python
+db = Database()
+        `);
+        console.log('Python database integration ready');
+        addToConsole('Python database ready! Use db.set(), db.get(), db.list() in Python', 'info');
+    } catch (error) {
+        console.error('Failed to setup Python database:', error);
+    }
+}
+
+// Database terminal commands
+async function handleDatabaseCommand(command) {
+    if (!db) {
+        addToTerminal('Database not initialized', 'error');
+        return;
+    }
+    
+    const args = command.split(' ').slice(1); // Remove 'db' prefix
+    const subcommand = args[0];
+    
+    try {
+        switch (subcommand) {
+            case 'set':
+                if (args.length < 3) {
+                    addToTerminal('Usage: db set <key> <value>', 'error');
+                    addToTerminal('Example: db set username "John Doe"', 'log');
+                    return;
+                }
+                const key = args[1];
+                let value = args.slice(2).join(' ');
+                
+                // Try to parse as JSON if it looks like JSON
+                if (value.startsWith('{') || value.startsWith('[') || value === 'true' || value === 'false' || !isNaN(value)) {
+                    try {
+                        value = JSON.parse(value);
+                    } catch (e) {
+                        value = value; // Keep as string if JSON parsing fails
+                    }
+                } else {
+                    value = value;
+                }
+                
+                await db.set(key, value);
+                
+                addToTerminal(`✓ Set ${key} = ${JSON.stringify(value)}`, 'info');
+                break;
+                
+            case 'get':
+                if (args.length < 2) {
+                    addToTerminal('Usage: db get <key>', 'error');
+                    addToTerminal('Example: db get username', 'log');
+                    return;
+                }
+                const getValue = await db.get(args[1]);
+                if (getValue !== null) {
+                    addToTerminal(`${args[1]} = ${JSON.stringify(getValue)}`, 'log');
+                } else {
+                    addToTerminal(`Key "${args[1]}" not found`, 'warn');
+                }
+                break;
+                
+            case 'delete':
+            case 'del':
+                if (args.length < 2) {
+                    addToTerminal('Usage: db delete <key>', 'error');
+                    addToTerminal('Example: db delete username', 'log');
+                    return;
+                }
+                await db.delete(args[1]);
+                addToTerminal(`✓ Deleted key "${args[1]}"`, 'info');
+                break;
+                
+            case 'list':
+            case 'ls':
+                const allData = await db.list();
+                const keys = Object.keys(allData);
+                if (keys.length === 0) {
+                    addToTerminal('Database is empty', 'log');
+                } else {
+                    addToTerminal(`Database contains ${keys.length} items:`, 'info');
+                    keys.forEach(key => {
+                        const item = allData[key];
+                        const date = new Date(item.timestamp).toLocaleString();
+                        addToTerminal(`  ${key} (${item.type}) = ${JSON.stringify(item.value)} [${date}]`, 'log');
+                    });
+                }
+                break;
+                
+            case 'push':
+                if (args.length < 3) {
+                    addToTerminal('Usage: db push <array_key> <value>', 'error');
+                    addToTerminal('Example: db push todos "Buy milk"', 'log');
+                    return;
+                }
+                const arrayKey = args[1];
+                let pushValue = args.slice(2).join(' ');
+                
+                // Try to parse as JSON
+                if (pushValue.startsWith('{') || pushValue.startsWith('[') || pushValue === 'true' || pushValue === 'false' || !isNaN(pushValue)) {
+                    try {
+                        pushValue = JSON.parse(pushValue);
+                    } catch (e) {
+                        pushValue = pushValue;
+                    }
+                } else {
+                    pushValue = pushValue;
+                }
+                
+                await db.push(arrayKey, pushValue);
+                addToTerminal(`✓ Pushed ${JSON.stringify(pushValue)} to array "${arrayKey}"`, 'info');
+                break;
+                
+            case 'inc':
+            case 'increment':
+                if (args.length < 2) {
+                    addToTerminal('Usage: db increment <key> [amount]', 'error');
+                    addToTerminal('Example: db increment counter 5', 'log');
+                    return;
+                }
+                const incKey = args[1];
+                const amount = args[2] ? parseInt(args[2]) : 1;
+                const newValue = await db.increment(incKey, amount);
+                addToTerminal(`✓ Incremented "${incKey}" to ${newValue}`, 'info');
+                break;
+                
+            case 'clear':
+                if (confirm('Are you sure you want to clear all database data? This cannot be undone.')) {
+                    const allData = await db.list();
+                    const keys = Object.keys(allData);
+                    for (const key of keys) {
+                        await db.delete(key);
+                    }
+                    addToTerminal(`✓ Cleared database (${keys.length} items removed)`, 'info');
+                } else {
+                    addToTerminal('Database clear cancelled', 'log');
+                }
+                break;
+                
+            case 'help':
+                showDatabaseHelp();
+                break;
+                
+            default:
+                addToTerminal(`Unknown database command: ${subcommand}`, 'error');
+                addToTerminal('Available commands: set, get, delete, list, push, increment, clear, help', 'info');
+        }
+    } catch (error) {
+        addToTerminal(`Database error: ${error.message}`, 'error');
+    }
+}
+
+function showDatabaseHelp() {
+    addToTerminal('HackMate Database - Available Commands', 'info');
+    addToTerminal('', 'log');
+    addToTerminal('Basic Operations:', 'info');
+    addToTerminal('  db set <key> <value>     Store a value', 'log');
+    addToTerminal('  db get <key>             Retrieve a value', 'log');
+    addToTerminal('  db delete <key>          Delete a key', 'log');
+    addToTerminal('  db list                  List all data', 'log');
+    addToTerminal('', 'log');
+    addToTerminal('Advanced Operations:', 'info');
+    addToTerminal('  db push <key> <value>    Add to array', 'log');
+    addToTerminal('  db increment <key> [n]   Increment number', 'log');
+    addToTerminal('  db clear                 Clear all data', 'log');
+    addToTerminal('', 'log');
+    addToTerminal('Examples:', 'info');
+    addToTerminal('  db set name "Alice"', 'log');
+    addToTerminal('  db set age 25', 'log');
+    addToTerminal('  db set config {"theme": "dark"}', 'log');
+    addToTerminal('  db push todos "Buy milk"', 'log');
+    addToTerminal('  db increment counter 1', 'log');
+    addToTerminal('', 'log');
+    addToTerminal('Note: Database is shared across all users in this room!', 'warn');
+}
+
+// Database Panel Functions
+async function refreshDatabase() {
+    if (!db) {
+        showDatabaseError('Database not initialized');
+        return;
+    }
+    
+    try {
+        const allData = await db.list();
+        const keys = Object.keys(allData);
+        
+        // Update stats
+        const statsEl = document.getElementById('database-stats');
+        if (keys.length === 0) {
+            statsEl.innerHTML = 'Database is empty';
+        } else {
+            statsEl.innerHTML = `${keys.length} item${keys.length > 1 ? 's' : ''} in database | Last updated: ${new Date().toLocaleTimeString()}`;
+        }
+        
+        // Update table
+        const tableEl = document.getElementById('database-table');
+        if (keys.length === 0) {
+            tableEl.innerHTML = `
+                <div class="database-empty">
+                    <div class="database-empty-icon">🗃️</div>
+                    <div>No data in database</div>
+                    <div style="margin-top: 8px; font-size: 11px;">Add some data using the input below or terminal commands</div>
+                </div>
+            `;
+        } else {
+            const entries = keys.sort().map(key => {
+                const item = allData[key];
+                return createDatabaseEntryHTML(key, item);
+            }).join('');
+            
+            tableEl.innerHTML = entries;
+        }
+        
+        console.log('Database panel refreshed:', keys.length, 'items');
+    } catch (error) {
+        showDatabaseError('Failed to load database: ' + error.message);
+    }
+}
+
+function createDatabaseEntryHTML(key, item) {
+    const { value, timestamp, type } = item;
+    const date = new Date(timestamp).toLocaleString();
+    
+    // Format value based on type
+    let formattedValue;
+    let valueClass = 'database-value';
+    
+    if (type === 'object') {
+        formattedValue = JSON.stringify(value, null, 2);
+        valueClass += ' json';
+    } else if (type === 'string') {
+        formattedValue = '"' + value + '"';
+        valueClass += ' string';
+    } else if (type === 'number') {
+        formattedValue = value.toString();
+        valueClass += ' number';
+    } else if (type === 'boolean') {
+        formattedValue = value.toString();
+        valueClass += ' boolean';
+    } else {
+        formattedValue = String(value);
+    }
+    
+    return `
+        <div class="database-entry" data-key="${key}">
+            <div class="database-entry-header">
+                <div>
+                    <span class="database-key">${key}</span>
+                    <span class="database-type">${type}</span>
+                </div>
+                <div style="display: flex; align-items: center; gap: 8px;">
+                    <span class="database-timestamp">${date}</span>
+                    <div class="database-actions-entry">
+                        <button class="database-edit-btn" onclick="editDatabaseEntry('${key}')">✏️</button>
+                        <button class="database-delete-btn" onclick="deleteDatabaseEntry('${key}')">🗑️</button>
+                    </div>
+                </div>
+            </div>
+            <div class="${valueClass}">${formattedValue}</div>
+        </div>
+    `;
+}
+
+async function addDatabaseEntry() {
+    const keyInput = document.getElementById('database-key-input');
+    const valueInput = document.getElementById('database-value-input');
+    
+    const key = keyInput.value.trim();
+    const valueStr = valueInput.value.trim();
+    
+    if (!key) {
+        alert('Please enter a key');
+        keyInput.focus();
+        return;
+    }
+    
+    if (!valueStr) {
+        alert('Please enter a value');
+        valueInput.focus();
+        return;
+    }
+    
+    try {
+        // Try to parse as JSON first
+        let value;
+        if (valueStr.startsWith('{') || valueStr.startsWith('[') || 
+            valueStr === 'true' || valueStr === 'false' || 
+            (!isNaN(valueStr) && valueStr !== '')) {
+            try {
+                value = JSON.parse(valueStr);
+            } catch (e) {
+                value = valueStr; // Keep as string if JSON parsing fails
+            }
+        } else {
+            value = valueStr;
+        }
+        
+        await db.set(key, value);
+        
+        // Clear inputs
+        keyInput.value = '';
+        valueInput.value = '';
+        
+        // Refresh the database view
+        await refreshDatabase();
+        
+        console.log('Added database entry:', key, '=', value);
+    } catch (error) {
+        alert('Failed to add entry: ' + error.message);
+    }
+}
+
+async function editDatabaseEntry(key) {
+    try {
+        const currentValue = await db.get(key);
+        let valueStr;
+        
+        if (typeof currentValue === 'object') {
+            valueStr = JSON.stringify(currentValue, null, 2);
+        } else if (typeof currentValue === 'string') {
+            valueStr = currentValue;
+        } else {
+            valueStr = String(currentValue);
+        }
+        
+        const newValueStr = prompt(`Edit value for "${key}":`, valueStr);
+        if (newValueStr === null) return; // User cancelled
+        
+        // Parse new value
+        let newValue;
+        if (newValueStr.startsWith('{') || newValueStr.startsWith('[') || 
+            newValueStr === 'true' || newValueStr === 'false' || 
+            (!isNaN(newValueStr) && newValueStr !== '')) {
+            try {
+                newValue = JSON.parse(newValueStr);
+            } catch (e) {
+                newValue = newValueStr;
+            }
+        } else {
+            newValue = newValueStr;
+        }
+        
+        await db.set(key, newValue);
+        await refreshDatabase();
+        
+        console.log('Updated database entry:', key, '=', newValue);
+    } catch (error) {
+        alert('Failed to edit entry: ' + error.message);
+    }
+}
+
+async function deleteDatabaseEntry(key) {
+    if (confirm(`Are you sure you want to delete "${key}"?`)) {
+        try {
+            await db.delete(key);
+            await refreshDatabase();
+            console.log('Deleted database entry:', key);
+        } catch (error) {
+            alert('Failed to delete entry: ' + error.message);
+        }
+    }
+}
+
+async function clearDatabase() {
+    if (confirm('Are you sure you want to clear ALL database data? This cannot be undone.')) {
+        try {
+            const allData = await db.list();
+            const keys = Object.keys(allData);
+            
+            for (const key of keys) {
+                await db.delete(key);
+            }
+            
+            await refreshDatabase();
+            console.log('Cleared database:', keys.length, 'items removed');
+        } catch (error) {
+            alert('Failed to clear database: ' + error.message);
+        }
+    }
+}
+
+function showAddDataModal() {
+    const keyInput = document.getElementById('database-key-input');
+    keyInput.focus();
+}
+
+function showDatabaseError(message) {
+    const statsEl = document.getElementById('database-stats');
+    const tableEl = document.getElementById('database-table');
+    
+    statsEl.innerHTML = '<span style="color: #e57373;">Error: ' + message + '</span>';
+    tableEl.innerHTML = '<div class="database-empty">' +
+        '<div class="database-empty-icon">⚠️</div>' +
+        '<div style="color: #e57373;">' + message + '</div>' +
+        '</div>';
+}
+
+// Handle Enter key in database inputs
+document.addEventListener('DOMContentLoaded', function() {
+    const keyInput = document.getElementById('database-key-input');
+    const valueInput = document.getElementById('database-value-input');
+    
+    if (keyInput && valueInput) {
+        keyInput.addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
+                valueInput.focus();
+            }
+        });
+        
+        valueInput.addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
+                addDatabaseEntry();
+            }
+        });
+    }
+});

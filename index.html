@@ -51,6 +51,7 @@
                 <div class="output-tab active" onclick="switchOutputTab('preview')">Preview</div>
                 <div class="output-tab" onclick="switchOutputTab('console')">Console</div>
                 <div class="output-tab" onclick="switchOutputTab('terminal')">Terminal</div>
+                <div class="output-tab" onclick="switchOutputTab('database')">Database</div>
             </div>
             <div class="output-content">
                 <iframe class="preview-frame" id="preview-frame"></iframe>
@@ -70,6 +71,29 @@
                     <div class="terminal-input">
                         <span class="terminal-prompt">$</span>
                         <input type="text" id="terminal-input" placeholder="Type commands here and press Enter">
+                    </div>
+                </div>
+                <div class="database-container hidden" id="database-container">
+                    <div class="database-header">
+                        <span class="database-title">Database</span>
+                        <div class="database-actions">
+                            <button class="db-refresh-btn" onclick="refreshDatabase()">🔄 Refresh</button>
+                            <button class="db-add-btn" onclick="showAddDataModal()">+ Add</button>
+                            <button class="db-clear-btn" onclick="clearDatabase()">🗑️ Clear</button>
+                        </div>
+                    </div>
+                    <div class="database-content">
+                        <div class="database-stats" id="database-stats">
+                            <span>Loading database...</span>
+                        </div>
+                        <div class="database-table" id="database-table">
+                            <!-- Database entries will be populated here -->
+                        </div>
+                    </div>
+                    <div class="database-input">
+                        <input type="text" id="database-key-input" placeholder="Key" style="width: 30%;">
+                        <input type="text" id="database-value-input" placeholder="Value (JSON supported)" style="width: 50%;">
+                        <button onclick="addDatabaseEntry()" style="width: 15%;">Add</button>
                     </div>
                 </div>
             </div>
