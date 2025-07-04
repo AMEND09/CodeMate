@@ -5,38 +5,357 @@ const gun = GUN(['https://gun-manhattan.herokuapp.com/gun']);
 let roomId;
 let isReadOnly = false;
 
-function initializeRoomWithViewMode() {
-    const hash = location.hash.replace('#', '');
-    
-    if (hash.startsWith('view-')) {
-        // Read-only mode
-        roomId = hash.substring(5); // Remove 'view-' prefix
-        isReadOnly = true;
-        document.body.classList.add('read-only-mode');
-        
-        // Update UI to show read-only status
-        document.getElementById('room-id').textContent = roomId + ' (View Only)';
-        document.getElementById('sync-status').textContent = 'Read Only Mode';
-        document.getElementById('sync-status').className = 'sync-status ready';
-        
-        // Hide editing controls
-        const newFileBtn = document.querySelector('.new-file-btn');
-        const deployBtn = document.querySelector('.deploy-button');
-        if (newFileBtn) newFileBtn.style.display = 'none';
-        if (deployBtn) deployBtn.style.display = 'none';
-        
-    } else {
-        // Normal collaborative mode
-        roomId = hash || Math.random().toString(36).substring(2, 8);
-        isReadOnly = false;
-        document.getElementById('room-id').textContent = roomId;
+// User management for collaboration
+let currentUser = null;
+let users = new Map(); // Store active users
+let userColors = new Map(); // Store user colors
+let availableColors = [
+    '#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4', '#FECA57',
+    '#FF9FF3', '#54A0FF', '#5F27CD', '#00D2D3', '#FF9F43',
+    '#10AC84', '#EE5A24', '#0ABDE3', '#FFC312', '#C44569',
+    '#F8B500', '#7D5BA6', '#20BF6B', '#FA8231', '#8395A7'
+];
+let usedColors = new Set();
+
+function generateUserId() {
+    // Create a more unique ID with timestamp + random
+    return Date.now().toString(36) + Math.random().toString(36).substring(2, 15);
+}
+
+function assignUserColor(userId) {
+    if (userColors.has(userId)) {
+        return userColors.get(userId);
     }
     
-    location.hash = (isReadOnly ? 'view-' : '') + roomId;
+    // Find an unused color
+    let color;
+    if (usedColors.size < availableColors.length) {
+        do {
+            color = availableColors[Math.floor(Math.random() * availableColors.length)];
+        } while (usedColors.has(color));
+    } else {
+        // If all colors are used, pick a random one
+        color = availableColors[Math.floor(Math.random() * availableColors.length)];
+    }
+    
+    usedColors.add(color);
+    userColors.set(userId, color);
+    return color;
 }
+
+function initializeUser() {
+    // Always generate a new user ID for each session to avoid conflicts
+    const userId = generateUserId();
+    localStorage.setItem('hackmate-user-id', userId);
+    
+    const username = localStorage.getItem('hackmate-username');
+    if (!username) {
+        // Show username modal
+        showUsernameModal();
+        return false;
+    }
+    
+    currentUser = {
+        id: userId,
+        name: username,
+        color: assignUserColor(userId),
+        joinTime: Date.now(),
+        activeFile: null
+    };
+    
+    setupUserSync();
+    return true;
+}
+
+function showUsernameModal() {
+    const modal = document.getElementById('username-modal');
+    modal.style.display = 'block';
+    
+    // Focus on input when modal opens
+    setTimeout(() => {
+        document.getElementById('username-input').focus();
+    }, 100);
+}
+
+function setUsername() {
+    const usernameInput = document.getElementById('username-input');
+    const username = usernameInput.value.trim();
+    
+    if (!username) {
+        alert('Please enter a valid username');
+        usernameInput.focus();
+        return;
+    }
+    
+    if (username.length > 30) {
+        alert('Username must be 30 characters or less');
+        usernameInput.focus();
+        return;
+    }
+    
+    // Store username
+    localStorage.setItem('hackmate-username', username);
+    
+    // Create new user with fresh ID for this session
+    const userId = generateUserId();
+    currentUser = {
+        id: userId,
+        name: username,
+        color: assignUserColor(userId),
+        joinTime: Date.now(),
+        activeFile: null
+    };
+    
+    // Hide modal
+    document.getElementById('username-modal').style.display = 'none';
+    
+    // Setup user sync
+    setupUserSync();
+    
+    // Initialize the rest of the app
+    initializeApp();
+}
+
+function setupUserSync() {
+    if (!currentUser) return;
+      // Add current user to local users map immediately
+    users.set(currentUser.id, currentUser);
+    console.log('Setting up user sync for:', currentUser.name, 'ID:', currentUser.id);
+    console.log('Room ID:', roomId);
+    updateActiveUsers();
+
+    const usersRef = gun.get('hackmate').get(roomId).get('users');
+    const userRef = usersRef.get(currentUser.id);
+    
+    // Sync current user to Gun
+    console.log('Syncing user to Gun:', currentUser);
+    userRef.put(currentUser);
+    
+    // Listen for user changes
+    usersRef.map().on((userData, userId) => {
+        console.log('Gun user change:', userId, userData);
+        if (userData && userId && userId !== '_' && userData.name && userData.id) {
+            console.log('Adding user to local map:', userId, userData.name);
+            users.set(userId, userData);
+            updateActiveUsers();
+            updateFileEditors();
+        } else if ((userData === null || !userData || !userData.name) && userId && userId !== '_') {
+            console.log('Removing user from local map:', userId);
+            users.delete(userId);
+            updateActiveUsers();
+            updateFileEditors();
+        }
+    });
+    
+    // Clean up when user leaves
+    window.addEventListener('beforeunload', () => {
+        if (currentUser) {
+            usersRef.get(currentUser.id).put(null);
+        }
+    });
+    
+    // Periodic heartbeat to show user is active
+    setInterval(() => {
+        if (currentUser) {
+            currentUser.lastActive = Date.now();
+            userRef.put(currentUser);
+        }
+    }, 5000);
+    
+    // Clean up inactive users
+    setInterval(() => {
+        const now = Date.now();
+        users.forEach((user, userId) => {
+            if (user.lastActive && now - user.lastActive > 15000) { // 15 seconds
+                users.delete(userId);
+                updateActiveUsers();
+                updateFileEditors();
+            }
+        });
+    }, 10000);
+}
+
+function updateActiveUsers() {
+    const usersList = document.getElementById('users-list');
+    // Include ALL users (including current user) for the display
+    const usersArray = Array.from(users.entries()).filter(([userId, user]) => userId !== '_' && user.name);
+    
+    console.log('updateActiveUsers called. Total users in map:', users.size);
+    console.log('Filtered users array:', usersArray.map(([id, user]) => `${id}: ${user.name}`));
+    
+    usersList.innerHTML = '';
+    
+    if (usersArray.length === 0) {
+        usersList.innerHTML = '<div class="users-summary">No users online</div>';
+        return;
+    }
+    
+    // Create users dropdown container
+    const dropdownContainer = document.createElement('div');
+    dropdownContainer.className = 'users-dropdown-container';
+    
+    // Create the clickable summary
+    const summary = document.createElement('div');
+    summary.className = 'users-summary';
+    summary.innerHTML = `${usersArray.length} user${usersArray.length > 1 ? 's' : ''} online ▼`;
+    
+    // Create the dropdown content
+    const dropdown = document.createElement('div');
+    dropdown.className = 'users-dropdown-content hidden';
+    
+    usersArray.forEach(([userId, user]) => {
+        const userItem = document.createElement('div');
+        userItem.className = 'user-dropdown-item';
+        
+        // Mark current user
+        const isCurrentUser = userId === currentUser?.id;
+        const userStatus = isCurrentUser 
+            ? (user.activeFile ? `editing ${user.activeFile}` : 'You')
+            : (user.activeFile ? `editing ${user.activeFile}` : 'idle');
+        
+        userItem.innerHTML = `
+            <div class="user-avatar" style="background-color: ${user.color || '#666'}">
+                ${user.name.charAt(0).toUpperCase()}
+            </div>
+            <div class="user-info">
+                <div class="user-name">${user.name}${isCurrentUser ? ' (You)' : ''}</div>
+                <div class="user-status">${userStatus}</div>
+            </div>
+        `;
+        dropdown.appendChild(userItem);
+    });
+    
+    // Toggle dropdown on click
+    summary.addEventListener('click', (e) => {
+        e.stopPropagation();
+        dropdown.classList.toggle('hidden');
+        summary.innerHTML = dropdown.classList.contains('hidden') 
+            ? `${usersArray.length} user${usersArray.length > 1 ? 's' : ''} online ▼`
+            : `${usersArray.length} user${usersArray.length > 1 ? 's' : ''} online ▲`;
+    });
+    
+    // Close dropdown when clicking outside
+    document.addEventListener('click', () => {
+        if (!dropdown.classList.contains('hidden')) {
+            dropdown.classList.add('hidden');
+            summary.innerHTML = `${usersArray.length} user${usersArray.length > 1 ? 's' : ''} online ▼`;
+        }
+    });
+    
+    dropdownContainer.appendChild(summary);
+    dropdownContainer.appendChild(dropdown);
+    usersList.appendChild(dropdownContainer);
+    
+    console.log('Updated users list:', usersArray.length, 'users');
+}
+
+function updateFileEditors() {
+    console.log('Updating file editors, users:', users.size);
+    console.log('Current users:', Array.from(users.entries()));
+    
+    document.querySelectorAll('.file-item').forEach(fileItem => {
+        const filename = fileItem.dataset.filename;
+        if (!filename) {
+            console.log('File item missing filename dataset');
+            return;
+        }
+        
+        // Remove any existing editor dots
+        const existingDots = fileItem.querySelectorAll('.editor-dot');
+        existingDots.forEach(dot => dot.remove());
+        
+        // Find users editing this file
+        let editorsCount = 0;
+        users.forEach((user, userId) => {
+            if (user && user.activeFile === filename && userId !== currentUser?.id && user.name) {
+                console.log(`User ${user.name} is editing ${filename}`);
+                
+                // Create a simple colored dot
+                const editorDot = document.createElement('div');
+                editorDot.className = 'editor-dot';
+                editorDot.style.backgroundColor = user.color || '#999';
+                editorDot.title = `${user.name} is editing this file`;
+                
+                // Insert the dot before the file actions
+                const fileActions = fileItem.querySelector('.file-actions');
+                if (fileActions) {
+                    fileItem.insertBefore(editorDot, fileActions);
+                } else {
+                    fileItem.appendChild(editorDot);
+                }
+                
+                editorsCount++;
+            }
+        });
+        
+        console.log(`File ${filename} has ${editorsCount} editors`);
+    });
+}
+
+// Add a manual trigger for debugging
+window.debugFileEditors = function() {
+    console.log('=== DEBUG FILE EDITORS ===');
+    console.log('Users:', users);
+    console.log('Current user:', currentUser);
+    console.log('File items:', document.querySelectorAll('.file-item').length);
+    updateFileEditors();
+};
+
+function updateUserActiveFile(filename) {
+    if (currentUser) {
+        console.log('Updating user active file:', filename, 'for user:', currentUser.name);
+        currentUser.activeFile = filename;
+        currentUser.lastActive = Date.now();
+        
+        // Update local users map
+        users.set(currentUser.id, currentUser);
+        
+        const userRef = gun.get('hackmate').get(roomId).get('users').get(currentUser.id);
+        userRef.put(currentUser);
+        
+        // Update UI immediately
+        updateActiveUsers();
+        setTimeout(() => updateFileEditors(), 100);
+    }
+}
+
+function initializeApp() {
+    // This will be called after username is set or for read-only mode
+    renderFileTree();
+    renderTabs();
+    updateEditor();
+    initializePanelResizing();
+    console.log('App initialized with user:', currentUser);
+}
+
+// Handle username input on Enter key
+document.addEventListener('DOMContentLoaded', function() {
+    const usernameInput = document.getElementById('username-input');
+    if (usernameInput) {
+        usernameInput.addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
+                setUsername();
+            }
+        });
+    }
+});
+
+// Make setUsername globally available
+window.setUsername = setUsername;
 
 // Initialize room
 initializeRoomWithViewMode();
+
+// Initialize user after room is set up
+if (!isReadOnly) {
+    // Only initialize user for collaborative mode
+    if (!initializeUser()) {
+        // User modal is shown, initialization will continue after username is set
+    }
+} else {
+    // For read-only mode, initialize app directly
+    initializeApp();
+}
 
 // File system and state management
 let files = {
@@ -369,6 +688,7 @@ function renderFileTree() {
     Object.keys(files).forEach(filename => {
         const fileItem = document.createElement('div');
         fileItem.className = `file-item ${currentFile === filename ? 'active' : ''}`;
+        fileItem.dataset.filename = filename; // Store filename in dataset
         fileItem.innerHTML = `
             <span class="file-icon">${getFileIcon(files[filename].type)}</span>
             <span class="file-name">${filename}</span>
@@ -381,6 +701,9 @@ function renderFileTree() {
         fileItem.addEventListener('click', () => openFile(filename));
         fileTree.appendChild(fileItem);
     });
+    
+    // Update file editing indicators after rendering
+    updateFileEditors();
 }
 
 function openFile(filename) {
@@ -389,6 +712,9 @@ function openFile(filename) {
     updateEditor();
     renderTabs();
     renderFileTree();
+    
+    // Update user active file in Gun
+    updateUserActiveFile(filename);
 }
 
 function closeFile(filename) {
@@ -517,6 +843,9 @@ function initializeCodeMirror() {
             clearTimeout(syncTimeout);
             syncTimeout = setTimeout(() => {
                 syncFileToGun(currentFile);
+                
+                // Update user active file in Gun
+                updateUserActiveFile(currentFile);
             }, 300); // Reduced from 500ms to 300ms for better responsiveness
         }
     });
@@ -643,7 +972,7 @@ function renameFile(oldName) {
 // Code execution functions
 function runCode() {
     if (isReadOnly) {
-        addToConsole('Cannot run code in read-only mode', 'error');
+        addToTerminal('Cannot run code in read-only mode', 'error');
         return;
     }
     
@@ -1974,48 +2303,209 @@ function initializeRoomWithViewMode() {
         document.getElementById('sync-status').className = 'sync-status ready';
         
         // Hide editing controls
-        document.querySelector('.new-file-btn').style.display = 'none';
-        document.querySelector('.deploy-button').style.display = 'none';
+        const newFileBtn = document.querySelector('.new-file-btn');
+        const deployBtn = document.querySelector('.deploy-button');
+        if (newFileBtn) newFileBtn.style.display = 'none';
+        if (deployBtn) deployBtn.style.display = 'none';
         
     } else {
         // Normal collaborative mode
         roomId = hash || Math.random().toString(36).substring(2, 8);
         isReadOnly = false;
+        document.getElementById('room-id').textContent = roomId;
     }
     
     location.hash = (isReadOnly ? 'view-' : '') + roomId;
-    if (!isReadOnly) {
-        document.getElementById('room-id').textContent = roomId;
+}
+
+// Helper function to clear user data (for testing)
+function clearUserData() {
+    localStorage.removeItem('hackmate-user-id');
+    localStorage.removeItem('hackmate-username');
+    users.clear();
+    usedColors.clear();
+    userColors.clear();
+    currentUser = null;
+    console.log('User data cleared');
+}
+
+// Make it available globally for debugging
+window.clearUserData = clearUserData;
+
+// Panel resizing functionality
+function initializePanelResizing() {
+    const sidebar = document.querySelector('.sidebar');
+    const mainContent = document.querySelector('.main-content');
+    const bottomPanel = document.querySelector('.bottom-panel');
+    
+    // Create resize handles
+    const verticalHandle = document.createElement('div');
+    verticalHandle.className = 'resize-handle vertical-handle';
+    verticalHandle.style.cssText = `
+        position: absolute;
+        top: 0;
+        right: -3px;
+        width: 6px;
+        height: 100%;
+        background: #444;
+        cursor: col-resize;
+        z-index: 1000;
+        opacity: 0;
+        transition: opacity 0.2s;
+    `;
+    
+    const horizontalHandle = document.createElement('div');
+    horizontalHandle.className = 'resize-handle horizontal-handle';
+    horizontalHandle.style.cssText = `
+        position: absolute;
+        top: -3px;
+        left: 0;
+        width: 100%;
+        height: 6px;
+        background: #444;
+        cursor: row-resize;
+        z-index: 1000;
+        opacity: 0;
+        transition: opacity 0.2s;
+    `;
+    
+    // Add handles to panels
+    if (sidebar) {
+        sidebar.style.position = 'relative';
+        sidebar.appendChild(verticalHandle);
+        
+        // Show handle on hover
+        sidebar.addEventListener('mouseenter', () => {
+            verticalHandle.style.opacity = '0.5';
+        });
+        sidebar.addEventListener('mouseleave', () => {
+            verticalHandle.style.opacity = '0';
+        });
     }
+    
+    if (bottomPanel) {
+        bottomPanel.style.position = 'relative';
+        bottomPanel.appendChild(horizontalHandle);
+        
+        // Show handle on hover
+        bottomPanel.addEventListener('mouseenter', () => {
+            horizontalHandle.style.opacity = '0.5';
+        });
+        bottomPanel.addEventListener('mouseleave', () => {
+            horizontalHandle.style.opacity = '0';
+        });
+    }
+    
+    // Vertical resizing (sidebar width)
+    let isResizingVertical = false;
+    let startX = 0;
+    let startWidth = 0;
+    
+    if (verticalHandle) {
+        verticalHandle.addEventListener('mousedown', (e) => {
+            isResizingVertical = true;
+            startX = e.clientX;
+            startWidth = parseInt(document.defaultView.getComputedStyle(sidebar).width, 10);
+            document.body.style.userSelect = 'none';
+            document.body.style.cursor = 'col-resize';
+            verticalHandle.style.opacity = '1';
+        });
+    }
+    
+    // Horizontal resizing (bottom panel height)
+    let isResizingHorizontal = false;
+    let startY = 0;
+    let startHeight = 0;
+    
+    if (horizontalHandle) {
+        horizontalHandle.addEventListener('mousedown', (e) => {
+            isResizingHorizontal = true;
+            startY = e.clientY;
+            startHeight = parseInt(document.defaultView.getComputedStyle(bottomPanel).height, 10);
+            document.body.style.userSelect = 'none';
+            document.body.style.cursor = 'row-resize';
+            horizontalHandle.style.opacity = '1';
+        });
+    }
+    
+    // Mouse move handler
+    document.addEventListener('mousemove', (e) => {
+        if (isResizingVertical && sidebar) {
+            const width = startWidth + e.clientX - startX;
+            const minWidth = 200;
+            const maxWidth = window.innerWidth * 0.5;
+            
+            if (width >= minWidth && width <= maxWidth) {
+                sidebar.style.width = width + 'px';
+                if (mainContent) {
+                    mainContent.style.marginLeft = width + 'px';
+                }
+                
+                // Refresh CodeMirror if it exists
+                if (codeMirrorInstance) {
+                    setTimeout(() => codeMirrorInstance.refresh(), 10);
+                }
+            }
+        }
+        
+        if (isResizingHorizontal && bottomPanel) {
+            const height = startHeight - (e.clientY - startY);
+            const minHeight = 200;
+            const maxHeight = window.innerHeight * 0.7;
+            
+            if (height >= minHeight && height <= maxHeight) {
+                bottomPanel.style.height = height + 'px';
+                
+                // Refresh CodeMirror if it exists
+                if (codeMirrorInstance) {
+                    setTimeout(() => codeMirrorInstance.refresh(), 10);
+                }
+            }
+        }
+    });
+    
+    // Mouse up handler
+    document.addEventListener('mouseup', () => {
+        if (isResizingVertical || isResizingHorizontal) {
+            isResizingVertical = false;
+            isResizingHorizontal = false;
+            document.body.style.userSelect = '';
+            document.body.style.cursor = '';
+            
+            if (verticalHandle) verticalHandle.style.opacity = '0';
+            if (horizontalHandle) horizontalHandle.style.opacity = '0';
+            
+            // Save panel sizes to localStorage
+            if (sidebar) {
+                localStorage.setItem('hackmate-sidebar-width', sidebar.style.width);
+            }
+            if (bottomPanel) {
+                localStorage.setItem('hackmate-bottom-panel-height', bottomPanel.style.height);
+            }
+        }
+    });
+    
+    // Restore saved panel sizes
+    const savedSidebarWidth = localStorage.getItem('hackmate-sidebar-width');
+    const savedBottomHeight = localStorage.getItem('hackmate-bottom-panel-height');
+    
+    if (savedSidebarWidth && sidebar) {
+        sidebar.style.width = savedSidebarWidth;
+        if (mainContent) {
+            mainContent.style.marginLeft = savedSidebarWidth;
+        }
+    }
+    
+    if (savedBottomHeight && bottomPanel) {
+        bottomPanel.style.height = savedBottomHeight;
+    }
+    
+    // Handle window resize
+    window.addEventListener('resize', () => {
+        if (codeMirrorInstance) {
+            setTimeout(() => codeMirrorInstance.refresh(), 100);
+        }
+    });
+    
+    console.log('Panel resizing initialized with draggable handles');
 }
-
-// Initialize read-only mode handling
-// Room already initialized above
-
-// Add read-only mode styles
-const readOnlyStyles = `
-.read-only-mode .code-editor {
-    background: #1e1e1e !important;
-    color: #cccccc !important;
-    cursor: default !important;
-}
-
-.read-only-mode .new-file-btn,
-.read-only-mode .deploy-button {
-    display: none !important;
-}
-
-.read-only-mode .run-button,
-.read-only-mode .flask-button {
-    opacity: 0.5;
-    cursor: not-allowed;
-}
-`;
-
-// Inject read-only styles
-const styleSheet = document.createElement('style');
-styleSheet.textContent = readOnlyStyles;
-document.head.appendChild(styleSheet);
-
-// Add deployment status to console
-addToConsole('🚀 Deploy feature available! Click "Deploy" to share your project.', 'info');

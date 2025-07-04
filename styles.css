@@ -136,6 +136,7 @@ body {
     border-radius: 3px;
     margin-bottom: 2px;
     position: relative;
+    gap: 8px;
 }
 
 .file-item:hover {
@@ -150,16 +151,25 @@ body {
 .file-icon {
     margin-right: 8px;
     font-size: 14px;
+    flex-shrink: 0;
 }
 
 .file-name {
     font-size: 13px;
     flex: 1;
+    min-width: 0; /* Allow shrinking */
+}
+
+.file-editors {
+    display: flex;
+    gap: 2px;
+    flex-shrink: 0;
 }
 
 .file-actions {
     display: none;
     gap: 4px;
+    flex-shrink: 0;
 }
 
 .file-item:hover .file-actions {
@@ -874,4 +884,188 @@ body {
     color: #ffd700;
     font-family: monospace;
     font-weight: bold;
+}
+
+/* Username Modal Styles */
+.username-info {
+    margin: 20px 0;
+}
+
+.username-info p {
+    margin-bottom: 15px;
+    color: #cccccc;
+    line-height: 1.4;
+}
+
+.username-info input {
+    width: 100%;
+    padding: 12px;
+    background: #1e1e1e;
+    border: 1px solid #3e3e42;
+    color: #ffffff;
+    border-radius: 4px;
+    font-size: 14px;
+    margin-bottom: 10px;
+}
+
+.username-info input:focus {
+    outline: none;
+    border-color: #007acc;
+}
+
+.username-note {
+    font-size: 12px !important;
+    color: #888888 !important;
+    font-style: italic;
+}
+
+/* Active Users Display */
+.active-users {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin: 0 10px;
+    padding: 5px 8px;
+    background: #3c3c3c;
+    border-radius: 4px;
+    font-size: 12px;
+}
+
+.users-label {
+    color: #cccccc;
+    font-weight: bold;
+}
+
+.users-list {
+    position: relative;
+}
+
+.users-dropdown-container {
+    position: relative;
+}
+
+.users-summary {
+    color: #cccccc;
+    font-size: 12px;
+    cursor: pointer;
+    padding: 4px 8px;
+    border-radius: 3px;
+    transition: background-color 0.2s;
+    user-select: none;
+}
+
+.users-summary:hover {
+    background-color: rgba(255, 255, 255, 0.1);
+}
+
+.users-dropdown-content {
+    position: absolute;
+    top: 100%;
+    right: 0;
+    background: #2d2d30;
+    border: 1px solid #3e3e42;
+    border-radius: 4px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+    z-index: 1000;
+    min-width: 200px;
+    max-height: 300px;
+    overflow-y: auto;
+    margin-top: 5px;
+}
+
+.users-dropdown-content.hidden {
+    display: none;
+}
+
+.user-dropdown-item {
+    display: flex;
+    align-items: center;
+    padding: 10px 12px;
+    gap: 10px;
+    border-bottom: 1px solid #3e3e42;
+    transition: background-color 0.2s;
+}
+
+.user-dropdown-item:hover {
+    background-color: #383838;
+}
+
+.user-dropdown-item:last-child {
+    border-bottom: none;
+}
+
+.user-avatar {
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: white;
+    font-weight: bold;
+    font-size: 10px;
+    flex-shrink: 0;
+    border: 1px solid rgba(255, 255, 255, 0.2);
+}
+
+.user-info {
+    flex: 1;
+}
+
+.user-name {
+    color: #d4d4d4;
+    font-size: 12px;
+    font-weight: bold;
+}
+
+.user-status {
+    color: #888;
+    font-size: 11px;
+    font-style: italic;
+}
+
+.user-indicator {
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: white;
+    font-weight: bold;
+    font-size: 10px;
+    cursor: pointer;
+    border: 2px solid rgba(255, 255, 255, 0.2);
+    transition: transform 0.2s;
+}
+
+.user-indicator:hover {
+    transform: scale(1.1);
+}
+
+/* Simple Editor Dots */
+.editor-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    margin-left: auto;
+    margin-right: 4px;
+    flex-shrink: 0;
+    border: 1px solid rgba(255, 255, 255, 0.2);
+}
+
+.file-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    position: relative;
+}
+
+.file-item .file-editors {
+    opacity: 1;
+    display: flex;
+}
+
+.file-item:hover .file-editors {
+    opacity: 1;
 }
