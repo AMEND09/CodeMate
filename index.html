@@ -20,15 +20,17 @@
     </div>
 
     <div class="main-container">
-        <div class="sidebar">
+        <div class="sidebar" id="sidebar">
             <div class="sidebar-header">
                 <span class="sidebar-title">Files</span>
                 <button class="new-file-btn" onclick="showNewFileModal()">+ New</button>
             </div>
             <div class="file-tree" id="file-tree"></div>
         </div>
+        
+        <div class="resize-handle resize-handle-vertical" data-direction="sidebar"></div>
 
-        <div class="editor-panel">
+        <div class="editor-panel" id="editor-panel">
             <div class="tabs" id="tabs"></div>
             <div class="editor-content">
                 <div class="editor-wrapper">
@@ -36,8 +38,10 @@
                 </div>
             </div>
         </div>
+        
+        <div class="resize-handle resize-handle-vertical" data-direction="editor"></div>
 
-        <div class="output-panel">
+        <div class="output-panel" id="output-panel">
             <div class="output-tabs">
                 <div class="output-tab active" onclick="switchOutputTab('preview')">Preview</div>
                 <div class="output-tab" onclick="switchOutputTab('console')">Console</div>

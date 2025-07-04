@@ -440,6 +440,9 @@ document.addEventListener('DOMContentLoaded', function() {
     renderTabs();
     updateEditor();
     
+    // Initialize panel resizing
+    initializePanelResizing();
+    
     console.log('DOMContentLoaded - UI initialized');
 });
 
@@ -1392,6 +1395,86 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
 });
+
+// Panel resizing functionality
+function initializePanelResizing() {
+    const resizeHandles = document.querySelectorAll('.resize-handle');
+    let isResizing = false;
+    let currentHandle = null;
+    let startX = 0;
+    let startWidth = 0;
+    let targetPanel = null;
+    
+    resizeHandles.forEach(handle => {
+        handle.addEventListener('mousedown', (e) => {
+            isResizing = true;
+            currentHandle = handle;
+            startX = e.clientX;
+            
+            const direction = handle.getAttribute('data-direction');
+            if (direction === 'sidebar') {
+                targetPanel = document.getElementById('sidebar');
+                startWidth = targetPanel.offsetWidth;
+            } else if (direction === 'editor') {
+                targetPanel = document.getElementById('output-panel');
+                startWidth = targetPanel.offsetWidth;
+            }
+            
+            document.body.classList.add('resizing');
+            e.preventDefault();
+        });
+    });
+    
+    document.addEventListener('mousemove', (e) => {
+        if (!isResizing || !currentHandle || !targetPanel) return;
+        
+        const direction = currentHandle.getAttribute('data-direction');
+        const deltaX = e.clientX - startX;
+        
+        if (direction === 'sidebar') {
+            // Resizing sidebar
+            const newWidth = startWidth + deltaX;
+            const minWidth = 150;
+            const maxWidth = 500;
+            
+            if (newWidth >= minWidth && newWidth <= maxWidth) {
+                targetPanel.style.width = newWidth + 'px';
+            }
+        } else if (direction === 'editor') {
+            // Resizing output panel (resize from right side, so subtract delta)
+            const newWidth = startWidth - deltaX;
+            const minWidth = 200;
+            const maxWidth = 800;
+            
+            if (newWidth >= minWidth && newWidth <= maxWidth) {
+                targetPanel.style.width = newWidth + 'px';
+            }
+        }
+        
+        // Refresh CodeMirror when resizing
+        if (codeMirrorInstance) {
+            setTimeout(() => {
+                codeMirrorInstance.refresh();
+            }, 10);
+        }
+    });
+    
+    document.addEventListener('mouseup', () => {
+        if (isResizing) {
+            isResizing = false;
+            currentHandle = null;
+            targetPanel = null;
+            document.body.classList.remove('resizing');
+            
+            // Final CodeMirror refresh
+            if (codeMirrorInstance) {
+                setTimeout(() => {
+                    codeMirrorInstance.refresh();
+                }, 100);
+            }
+        }
+    });
+}
 
 // Initialize with welcome messages
 setTimeout(() => {
