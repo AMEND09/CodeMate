@@ -5,7 +5,7 @@ app = Flask(__name__)
 
 @app.route('/')
 def home():
-    return render_template('index.html', msg="Welcome to HackMate Deploy Demo!")
+    return render_template('index.html', msg="Welcome to CodeMate Deploy Demo!")
 
 @app.route('/api/')
 def api():

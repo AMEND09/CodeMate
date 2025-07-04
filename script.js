@@ -46,9 +46,9 @@ function assignUserColor(userId) {
 function initializeUser() {
     // Always generate a new user ID for each session to avoid conflicts
     const userId = generateUserId();
-    localStorage.setItem('hackmate-user-id', userId);
+    localStorage.setItem('CodeMate-user-id', userId);
     
-    const username = localStorage.getItem('hackmate-username');
+    const username = localStorage.getItem('CodeMate-username');
     if (!username) {
         // Show username modal
         showUsernameModal();
@@ -94,7 +94,7 @@ function setUsername() {
     }
     
     // Store username
-    localStorage.setItem('hackmate-username', username);
+    localStorage.setItem('CodeMate-username', username);
     
     // Create new user with fresh ID for this session
     const userId = generateUserId();
@@ -124,7 +124,7 @@ function setupUserSync() {
     console.log('Room ID:', roomId);
     updateActiveUsers();
 
-    const usersRef = gun.get('hackmate').get(roomId).get('users');
+    const usersRef = gun.get('CodeMate').get(roomId).get('users');
     const userRef = usersRef.get(currentUser.id);
     
     // Sync current user to Gun
@@ -310,7 +310,7 @@ function updateUserActiveFile(filename) {
         // Update local users map
         users.set(currentUser.id, currentUser);
         
-        const userRef = gun.get('hackmate').get(roomId).get('users').get(currentUser.id);
+        const userRef = gun.get('CodeMate').get(roomId).get('users').get(currentUser.id);
         userRef.put(currentUser);
         
         // Update UI immediately
@@ -490,11 +490,11 @@ Werkzeug==2.3.7`,
         type: 'txt'
     },
     'database_example.js': {
-        content: `// HackMate Database Example
+        content: `// CodeMate Database Example
 // The database is available as 'db' and is shared across all users
 
 async function databaseDemo() {
-    console.log('=== HackMate Database Demo ===');
+    console.log('=== CodeMate Database Demo ===');
     
     // Store some data
     await db.set('username', 'Alice');
@@ -550,14 +550,14 @@ databaseDemo().catch(console.error);
         type: 'js'
     },
     'database_example.py': {
-        content: `# HackMate Database Example (Python)
+        content: `# CodeMate Database Example (Python)
 # The database is available as 'db' and is shared across all users
 
 import asyncio
 import json
 
 async def database_demo():
-    print('=== HackMate Database Demo (Python) ===')
+    print('=== CodeMate Database Demo (Python) ===')
     
     # Store some data
     await db.set('python_user', 'Bob')
@@ -609,7 +609,7 @@ let activeFiles = new Set(['index.html']);
 let codeMirrorInstance = null;
 
 // Get Gun references for file system
-const filesDoc = gun.get('hackmate').get(roomId).get('files');
+const filesDoc = gun.get('CodeMate').get(roomId).get('files');
 
 // Pyodide setup
 let pyodide = null;
@@ -688,7 +688,7 @@ function setupFileSync() {
 // Set up GunJS sync for a specific file
 function setupFileSyncForFile(filename) {
     console.log('Setting up GunJS sync for file:', filename);
-    const fileRef = gun.get('hackmate').get(roomId).get(filename);
+    const fileRef = gun.get('CodeMate').get(roomId).get(filename);
     
     // Listen for changes - exactly like your example: note.on((data) => { view.value = data });
     fileRef.on((data) => {
@@ -718,7 +718,7 @@ setupFileSync();
 // Also check for files that exist in Gun but not locally
 function discoverFilesFromGun() {
     console.log('Starting file discovery from Gun...');
-    const roomRef = gun.get('hackmate').get(roomId);
+    const roomRef = gun.get('CodeMate').get(roomId);
     
     // Listen for any new files in the room
     roomRef.on((data) => {
@@ -766,7 +766,7 @@ discoverFilesFromGun();
 function syncFileToGun(filename) {
     if (files[filename]) {
         console.log('Syncing file to Gun:', filename, 'Content length:', files[filename].content.length);
-        const fileRef = gun.get('hackmate').get(roomId).get(filename);
+        const fileRef = gun.get('CodeMate').get(roomId).get(filename);
         fileRef.put(files[filename].content); // Store just the content string, not the object
         console.log('File sync completed for:', filename);
     } else {
@@ -1051,7 +1051,7 @@ function deleteFile(filename) {
     if (confirm(`Are you sure you want to delete ${filename}?`)) {
         delete files[filename];
         console.log('Deleting file from Gun:', filename);
-        const fileRef = gun.get('hackmate').get(roomId).get(filename);
+        const fileRef = gun.get('CodeMate').get(roomId).get(filename);
         fileRef.put(null);
         
         if (currentFile === filename) {
@@ -1069,7 +1069,7 @@ function renameFile(oldName) {
         delete files[oldName];
         
         console.log('Renaming file in Gun:', oldName, '->', newName);
-        const oldFileRef = gun.get('hackmate').get(roomId).get(oldName);
+        const oldFileRef = gun.get('CodeMate').get(roomId).get(oldName);
         oldFileRef.put(null);
         
         // Set up listener for new file using centralized function
@@ -1888,14 +1888,14 @@ async function handleNpmInstall(command) {
                 packageJson = JSON.parse(files['package.json'].content);
             } catch (e) {
                 packageJson = {
-                    "name": "hackmate-project",
+                    "name": "CodeMate-project",
                     "version": "1.0.0",
                     "dependencies": {}
                 };
             }
         } else {
             packageJson = {
-                "name": "hackmate-project",
+                "name": "CodeMate-project",
                 "version": "1.0.0",
                 "dependencies": {}
             };
@@ -1985,9 +1985,9 @@ function listNpmPackages() {
 
 function initNpmProject() {
     const packageJson = {
-        "name": "hackmate-project",
+        "name": "CodeMate-project",
         "version": "1.0.0",
-        "description": "A HackMate collaborative coding project",
+        "description": "A CodeMate collaborative coding project",
         "main": "index.js",
         "scripts": {
             "start": "node server.js",
@@ -1996,8 +1996,8 @@ function initNpmProject() {
         },
         "dependencies": {},
         "devDependencies": {},
-        "keywords": ["hackmate", "collaborative", "coding"],
-        "author": "HackMate User",
+        "keywords": ["CodeMate", "collaborative", "coding"],
+        "author": "CodeMate User",
         "license": "MIT"
     };
     
@@ -2044,7 +2044,7 @@ function showNpmHelp() {
 }
 
 function showTerminalHelp() {
-    addToTerminal('HackMate Terminal - Available Commands', 'info');
+    addToTerminal('CodeMate Terminal - Available Commands', 'info');
     addToTerminal('', 'log');
     addToTerminal('File Operations:', 'info');
     addToTerminal('  ls                       List files in workspace', 'log');
@@ -2080,11 +2080,11 @@ function showTerminalHelp() {
 
 // Initialize with welcome messages
 setTimeout(() => {
-    addToConsole('Welcome to HackMate Console! Type JavaScript or Python code and press Enter to execute.', 'info');
+    addToConsole('Welcome to CodeMate Console! Type JavaScript or Python code and press Enter to execute.', 'info');
     addToConsole('You can also see console output from your code here.', 'info');
     addToConsole('Python support is loading... Please wait for "Python Ready" status.', 'info');
     
-    addToTerminal('Welcome to HackMate Terminal!', 'info');
+    addToTerminal('Welcome to CodeMate Terminal!', 'info');
     addToTerminal('🚀 New: Use "Deploy" button to create shareable links for your project!', 'info');
     addToTerminal('Available commands:', 'info');
     addToTerminal('  ls - list files', 'log');
@@ -2361,13 +2361,13 @@ function downloadProject() {
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
-        a.download = `hackmate-project-${roomId}.txt`;
+        a.download = `CodeMate-project-${roomId}.txt`;
         document.body.appendChild(a);
         a.click();
         document.body.removeChild(a);
         URL.revokeObjectURL(url);
         
-        addToConsole(`Project downloaded as hackmate-project-${roomId}.txt`, 'info');
+        addToConsole(`Project downloaded as CodeMate-project-${roomId}.txt`, 'info');
     } catch (error) {
         console.error('Error creating project archive:', error);
         // Fallback: download as individual files
@@ -2376,7 +2376,7 @@ function downloadProject() {
 }
 
 function createProjectArchive() {
-    let archive = `HackMate Project Archive
+    let archive = `CodeMate Project Archive
 Room ID: ${roomId}
 Created: ${new Date().toISOString()}
 Files: ${Object.keys(files).length}
@@ -2456,8 +2456,8 @@ function initializeRoomWithViewMode() {
 
 // Helper function to clear user data (for testing)
 function clearUserData() {
-    localStorage.removeItem('hackmate-user-id');
-    localStorage.removeItem('hackmate-username');
+    localStorage.removeItem('CodeMate-user-id');
+    localStorage.removeItem('CodeMate-username');
     users.clear();
     usedColors.clear();
     userColors.clear();
@@ -2613,17 +2613,17 @@ function initializePanelResizing() {
             
             // Save panel sizes to localStorage
             if (sidebar) {
-                localStorage.setItem('hackmate-sidebar-width', sidebar.style.width);
+                localStorage.setItem('CodeMate-sidebar-width', sidebar.style.width);
             }
             if (bottomPanel) {
-                localStorage.setItem('hackmate-bottom-panel-height', bottomPanel.style.height);
+                localStorage.setItem('CodeMate-bottom-panel-height', bottomPanel.style.height);
             }
         }
     });
     
     // Restore saved panel sizes
-    const savedSidebarWidth = localStorage.getItem('hackmate-sidebar-width');
-    const savedBottomHeight = localStorage.getItem('hackmate-bottom-panel-height');
+    const savedSidebarWidth = localStorage.getItem('CodeMate-sidebar-width');
+    const savedBottomHeight = localStorage.getItem('CodeMate-bottom-panel-height');
     
     if (savedSidebarWidth && sidebar) {
         sidebar.style.width = savedSidebarWidth;
@@ -2647,11 +2647,11 @@ function initializePanelResizing() {
 }
 
 // Basic Database functionality using Gun.js
-class HackMateDB {
+class CodeMateDB {
     constructor(roomId) {
         this.roomId = roomId;
-        this.db = gun.get('hackmate').get(roomId).get('database');
-        console.log('HackMateDB initialized for room:', roomId);
+        this.db = gun.get('CodeMate').get(roomId).get('database');
+        console.log('CodeMateDB initialized for room:', roomId);
     }
 
     // Set a key-value pair
@@ -2774,7 +2774,7 @@ let db = null;
 
 function initializeDatabase() {
     if (roomId) {
-        db = new HackMateDB(roomId);
+        db = new CodeMateDB(roomId);
         
         // Make it available globally for user scripts
         window.db = db;
@@ -2989,7 +2989,7 @@ async function handleDatabaseCommand(command) {
 }
 
 function showDatabaseHelp() {
-    addToTerminal('HackMate Database - Available Commands', 'info');
+    addToTerminal('CodeMate Database - Available Commands', 'info');
     addToTerminal('', 'log');
     addToTerminal('Basic Operations:', 'info');
     addToTerminal('  db set <key> <value>     Store a value', 'log');
