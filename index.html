@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>HackMate - Full-Stack Collaborative Code Editor</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="header">
+        <div class="logo">🚀 CodeMate</div>
+        <div class="room-info">
+            <span>Room:</span>
+            <div class="room-id" id="room-id">Loading...</div>
+            <div class="sync-status loading" id="sync-status">Files Loading...</div>
+            <div class="python-status loading" id="python-status">Python Loading...</div>
+            <button class="run-button" onclick="runCode()">▶ Run Code</button>
+            <button class="flask-button" onclick="runFlaskApp()">🌶️ Run Flask</button>
+        </div>
+    </div>
+
+    <div class="main-container">
+        <div class="sidebar">
+            <div class="sidebar-header">
+                <span class="sidebar-title">Files</span>
+                <button class="new-file-btn" onclick="showNewFileModal()">+ New</button>
+            </div>
+            <div class="file-tree" id="file-tree"></div>
+        </div>
+
+        <div class="editor-panel">
+            <div class="tabs" id="tabs"></div>
+            <div class="editor-content">
+                <div class="editor-wrapper">
+                    <textarea class="code-editor" id="code-editor" placeholder="Select a file to start editing..."></textarea>
+                </div>
+            </div>
+        </div>
+
+        <div class="output-panel">
+            <div class="output-tabs">
+                <div class="output-tab active" onclick="switchOutputTab('preview')">Preview</div>
+                <div class="output-tab" onclick="switchOutputTab('console')">Console</div>
+                <div class="output-tab" onclick="switchOutputTab('terminal')">Terminal</div>
+            </div>
+            <div class="output-content">
+                <iframe class="preview-frame" id="preview-frame"></iframe>
+                <div class="console-container hidden" id="console-container">
+                    <div class="console-output" id="console-output"></div>
+                    <div class="console-input">
+                        <span class="console-prompt">></span>
+                        <input type="text" id="console-input" placeholder="Type JavaScript or Python code here and press Enter">
+                    </div>
+                </div>
+                <div class="terminal-container hidden" id="terminal-container">
+                    <div class="terminal-header">
+                        <span class="terminal-title">Terminal</span>
+                        <button class="terminal-clear" onclick="clearTerminal()">Clear</button>
+                    </div>
+                    <div class="terminal-output" id="terminal-output"></div>
+                    <div class="terminal-input">
+                        <span class="terminal-prompt">$</span>
+                        <input type="text" id="terminal-input" placeholder="Type commands here and press Enter">
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="status-bar">
+        <div class="status-dot"></div>
+        <span>Connected to collaborative session</span>
+    </div>
+
+    <!-- New File Modal -->
+    <div class="modal" id="new-file-modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 class="modal-title">Create New File</h2>
+                <span class="close" onclick="hideNewFileModal()">&times;</span>
+            </div>
+            <div class="form-group">
+                <label for="new-file-name">File Name:</label>
+                <input type="text" id="new-file-name" placeholder="e.g., index.html">
+            </div>
+            <div class="form-group">
+                <label for="new-file-type">File Type:</label>
+                <select id="new-file-type">
+                    <option value="html">HTML</option>
+                    <option value="css">CSS</option>
+                    <option value="js">JavaScript</option>
+                    <option value="python">Python</option>
+                    <option value="txt">Text</option>
+                    <option value="json">JSON</option>
+                    <option value="md">Markdown</option>
+                </select>
+            </div>
+            <div class="modal-actions">
+                <button class="btn btn-secondary" onclick="hideNewFileModal()">Cancel</button>
+                <button class="btn btn-primary" onclick="createNewFile()">Create</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/gun@0.2020.1240/gun.js"></script>
+    <script src="https://cdn.jsdelivr.net/pyodide/v0.24.1/full/pyodide.js"></script>
+    <!-- CodeMirror for syntax highlighting -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.15/codemirror.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.15/mode/javascript/javascript.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.15/mode/python/python.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.15/mode/htmlmixed/htmlmixed.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.15/mode/css/css.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.15/mode/xml/xml.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.15/mode/markdown/markdown.min.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.15/codemirror.min.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.15/theme/monokai.min.css">
+    <script src="script.js"></script>
+</body>
+</html>

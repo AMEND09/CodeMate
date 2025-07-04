@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="stylesheet" href="style.css">
+    <title>Flask-Lite Demo</title>
+</head>
+<body>
+    <div class="container">
+        <h1>{{ msg }}</h1>
+        <p>This is a Flask-Lite application running in the browser!</p>
+        <button onclick="fetchData()">Get Random Number</button>
+        <p id="result"></p>
+    </div>
+
+    <script>
+        async function fetchData() {
+            try {
+                console.log('Fetching data from /api/');
+                const response = await fetch('/api/');
+                
+                console.log('Response received:', response.status, response.statusText);
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                
+                const text = await response.text();
+                console.log('Raw response text:', text);
+                
+                try {
+                    const data = JSON.parse(text);
+                    console.log('Parsed JSON:', data);
+                    document.getElementById('result').textContent = `Random number: ${data.value}`;
+                } catch (parseError) {
+                    console.error('JSON Parse Error:', parseError);
+                    // Maybe it's already a plain value, try to display it directly
+                    document.getElementById('result').textContent = `Response: ${text}`;
+                }
+            } catch (error) {
+                console.error('Fetch Error:', error);
+                document.getElementById('result').textContent = 'Error: ' + error.message;
+            }
+        }
+    </script>
+</body>
+</html>
