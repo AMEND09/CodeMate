@@ -16,6 +16,7 @@
             <div class="python-status loading" id="python-status">Python Loading...</div>
             <button class="run-button" onclick="runCode()">▶ Run Code</button>
             <button class="flask-button" onclick="runFlaskApp()">🌶️ Run Flask</button>
+            <button class="deploy-button" onclick="deployApp()">🚀 Deploy</button>
         </div>
     </div>
 
@@ -102,6 +103,55 @@
             <div class="modal-actions">
                 <button class="btn btn-secondary" onclick="hideNewFileModal()">Cancel</button>
                 <button class="btn btn-primary" onclick="createNewFile()">Create</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Deploy Modal -->
+    <div class="modal" id="deploy-modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>🚀 Deploy Your App</h3>
+                <span class="close" onclick="hideDeployModal()">&times;</span>
+            </div>
+            <div class="deploy-info">
+                <p>Your app is ready to be shared! Here are the deployment options:</p>
+                
+                <div class="deploy-option">
+                    <h4>📋 Collaborative Link</h4>
+                    <p>Share this link to let others collaborate on your project:</p>
+                    <div class="link-container">
+                        <input type="text" id="collab-link" readonly>
+                        <button class="copy-btn" onclick="copyToClipboard('collab-link')">Copy</button>
+                    </div>
+                </div>
+                
+                <div class="deploy-option">
+                    <h4>🌐 Shareable Preview</h4>
+                    <p>Share this link to let others view your app (read-only):</p>
+                    <div class="link-container">
+                        <input type="text" id="preview-link" readonly>
+                        <button class="copy-btn" onclick="copyToClipboard('preview-link')">Copy</button>
+                    </div>
+                </div>
+                
+                <div class="deploy-option">
+                    <h4>📦 Export Project</h4>
+                    <p>Download your project as a ZIP file:</p>
+                    <button class="btn btn-primary" onclick="downloadProject()">Download ZIP</button>
+                </div>
+                
+                <div class="deploy-stats">
+                    <p><strong>Project Info:</strong></p>
+                    <ul>
+                        <li>Room ID: <span id="deploy-room-id"></span></li>
+                        <li>Files: <span id="deploy-file-count"></span></li>
+                        <li>Created: <span id="deploy-created-date"></span></li>
+                    </ul>
+                </div>
+            </div>
+            <div class="modal-actions">
+                <button class="btn btn-secondary" onclick="hideDeployModal()">Close</button>
             </div>
         </div>
     </div>

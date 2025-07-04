@@ -1,10 +1,42 @@
 // Initialize Gun with the peer relay server
 const gun = GUN(['https://gun-manhattan.herokuapp.com/gun']);
 
-// Get or create room ID
-const roomId = location.hash.replace('#', '') || Math.random().toString(36).substring(2, 8);
-location.hash = roomId;
-document.getElementById('room-id').textContent = roomId;
+// Enhanced room ID handling for read-only mode
+let roomId;
+let isReadOnly = false;
+
+function initializeRoomWithViewMode() {
+    const hash = location.hash.replace('#', '');
+    
+    if (hash.startsWith('view-')) {
+        // Read-only mode
+        roomId = hash.substring(5); // Remove 'view-' prefix
+        isReadOnly = true;
+        document.body.classList.add('read-only-mode');
+        
+        // Update UI to show read-only status
+        document.getElementById('room-id').textContent = roomId + ' (View Only)';
+        document.getElementById('sync-status').textContent = 'Read Only Mode';
+        document.getElementById('sync-status').className = 'sync-status ready';
+        
+        // Hide editing controls
+        const newFileBtn = document.querySelector('.new-file-btn');
+        const deployBtn = document.querySelector('.deploy-button');
+        if (newFileBtn) newFileBtn.style.display = 'none';
+        if (deployBtn) deployBtn.style.display = 'none';
+        
+    } else {
+        // Normal collaborative mode
+        roomId = hash || Math.random().toString(36).substring(2, 8);
+        isReadOnly = false;
+        document.getElementById('room-id').textContent = roomId;
+    }
+    
+    location.hash = (isReadOnly ? 'view-' : '') + roomId;
+}
+
+// Initialize room
+initializeRoomWithViewMode();
 
 // File system and state management
 let files = {
@@ -206,32 +238,88 @@ initializePyodide();
 // Set up real-time collaboration for files - using exact pattern from your example
 function setupFileSync() {
     Object.keys(files).forEach(filename => {
-        const fileRef = gun.get('hackmate').get(roomId).get(filename);
-        
-        // Listen for changes - exactly like your example: note.on((data) => { view.value = data });
-        fileRef.on((data) => {
-            if (data && typeof data === 'string') {
-                console.log('GunJS file received:', filename, 'Content length:', data.length);
+        setupFileSyncForFile(filename);
+        // Sync initial content to Gun
+        syncFileToGun(filename);
+    });
+}
+
+// Set up GunJS sync for a specific file
+function setupFileSyncForFile(filename) {
+    console.log('Setting up GunJS sync for file:', filename);
+    const fileRef = gun.get('hackmate').get(roomId).get(filename);
+    
+    // Listen for changes - exactly like your example: note.on((data) => { view.value = data });
+    fileRef.on((data) => {
+        if (data && typeof data === 'string') {
+            console.log('GunJS file received:', filename, 'Content length:', data.length);
+            
+            // Update local file if content is different
+            if (files[filename] && files[filename].content !== data) {
+                console.log('Updating local file content from Gun:', filename);
+                files[filename].content = data;
                 
-                // Update local file if content is different
-                if (files[filename] && files[filename].content !== data) {
-                    files[filename].content = data;
-                    
-                    // Update editor if this file is currently open
-                    if (currentFile === filename && codeMirrorInstance) {
-                        const cursorPos = codeMirrorInstance.getCursor();
-                        codeMirrorInstance.setValue(data);
-                        codeMirrorInstance.setCursor(cursorPos);
-                    }
-                    
-                    renderFileTree();
+                // Update editor if this file is currently open
+                if (currentFile === filename && codeMirrorInstance) {
+                    const cursorPos = codeMirrorInstance.getCursor();
+                    codeMirrorInstance.setValue(data);
+                    codeMirrorInstance.setCursor(cursorPos);
                 }
+                
+                renderFileTree();
             }
-        });
+        }
     });
 }
 
 setupFileSync();
+
+// Also check for files that exist in Gun but not locally
+function discoverFilesFromGun() {
+    console.log('Starting file discovery from Gun...');
+    const roomRef = gun.get('hackmate').get(roomId);
+    
+    // Listen for any new files in the room
+    roomRef.on((data) => {
+        if (data && typeof data === 'object') {
+            console.log('Gun room data received:', Object.keys(data));
+            Object.keys(data).forEach(key => {
+                // Skip special Gun properties
+                if (key.startsWith('_') || key === 'files') return;
+                
+                // If this is a file we don't have locally, add it
+                if (!files[key] && typeof data[key] === 'string') {
+                    console.log('Discovered new file from Gun:', key);
+                    
+                    // Determine file type from extension
+                    const extension = key.split('.').pop().toLowerCase();
+                    const typeMap = {
+                        'html': 'html',
+                        'css': 'css',
+                        'js': 'js',
+                        'py': 'python',
+                        'txt': 'txt',
+                        'json': 'json',
+                        'md': 'md'
+                    };
+                    
+                    files[key] = {
+                        content: data[key],
+                        type: typeMap[extension] || 'txt'
+                    };
+                    
+                    // Set up sync for this file
+                    setupFileSyncForFile(key);
+                    
+                    // Update UI
+                    renderFileTree();
+                }
+            });
+        }
+    });
+}
+
+discoverFilesFromGun();
 
 // Sync file changes to Gun - exactly like your example: view.oninput = () => { note.put(view.value) };
 function syncFileToGun(filename) {
@@ -239,6 +327,9 @@ function syncFileToGun(filename) {
         console.log('Syncing file to Gun:', filename, 'Content length:', files[filename].content.length);
         const fileRef = gun.get('hackmate').get(roomId).get(filename);
         fileRef.put(files[filename].content); // Store just the content string, not the object
+        console.log('File sync completed for:', filename);
+    } else {
+        console.warn('Attempted to sync non-existent file:', filename);
     }
 }
 
@@ -368,6 +459,12 @@ function updateEditor() {
         setTimeout(() => {
             codeMirrorInstance.refresh();
             codeMirrorInstance.focus();
+            
+            // Apply read-only mode if needed
+            if (isReadOnly) {
+                codeMirrorInstance.setOption('readOnly', true);
+                codeMirrorInstance.setOption('cursorBlinkRate', -1); // Hide cursor
+            }
         }, 100);
     }
 }
@@ -420,7 +517,7 @@ function initializeCodeMirror() {
             clearTimeout(syncTimeout);
             syncTimeout = setTimeout(() => {
                 syncFileToGun(currentFile);
-            }, 500);
+            }, 300); // Reduced from 500ms to 300ms for better responsiveness
         }
     });
     
@@ -448,6 +545,10 @@ document.addEventListener('DOMContentLoaded', function() {
 
 // New file functionality
 function showNewFileModal() {
+    if (isReadOnly) {
+        addToConsole('Cannot create files in read-only mode', 'error');
+        return;
+    }
     document.getElementById('new-file-modal').style.display = 'block';
 }
 
@@ -486,23 +587,10 @@ function createNewFile() {
         type: type
     };
     
-    // Set up GunJS listener for the new file - exactly like your example
-    const fileRef = gun.get('hackmate').get(roomId).get(name);
-    fileRef.on((data) => {
-        if (data && typeof data === 'string') {
-            console.log('GunJS file received:', name, 'Content length:', data.length);
-            if (files[name] && files[name].content !== data) {
-                files[name].content = data;
-                if (currentFile === name && codeMirrorInstance) {
-                    const cursorPos = codeMirrorInstance.getCursor();
-                    codeMirrorInstance.setValue(data);
-                    codeMirrorInstance.setCursor(cursorPos);
-                }
-                renderFileTree();
-            }
-        }
-    });
+    // Set up GunJS sync for the new file using the centralized function
+    setupFileSyncForFile(name);
     
+    // Sync the initial content to Gun
     syncFileToGun(name);
     openFile(name);
     hideNewFileModal();
@@ -533,22 +621,8 @@ function renameFile(oldName) {
         const oldFileRef = gun.get('hackmate').get(roomId).get(oldName);
         oldFileRef.put(null);
         
-        // Set up listener for new file
-        const newFileRef = gun.get('hackmate').get(roomId).get(newName);
-        newFileRef.on((data) => {
-            if (data && typeof data === 'string') {
-                console.log('GunJS file received:', newName, 'Content length:', data.length);
-                if (files[newName] && files[newName].content !== data) {
-                    files[newName].content = data;
-                    if (currentFile === newName && codeMirrorInstance) {
-                        const cursorPos = codeMirrorInstance.getCursor();
-                        codeMirrorInstance.setValue(data);
-                        codeMirrorInstance.setCursor(cursorPos);
-                    }
-                    renderFileTree();
-                }
-            }
-        });
+        // Set up listener for new file using centralized function
+        setupFileSyncForFile(newName);
         
         syncFileToGun(newName);
         
@@ -568,6 +642,11 @@ function renameFile(oldName) {
 
 // Code execution functions
 function runCode() {
+    if (isReadOnly) {
+        addToConsole('Cannot run code in read-only mode', 'error');
+        return;
+    }
+    
     const fileType = currentFile ? files[currentFile].type : 'html';
     
     if (fileType === 'python') {
@@ -777,6 +856,11 @@ function logDate() {
 }
 
 async function runFlaskApp() {
+    if (isReadOnly) {
+        addToTerminal('Cannot run Flask app in read-only mode', 'error');
+        return;
+    }
+    
     if (!pyodideReady) {
         addToTerminal('Python is still loading. Please wait...', 'warn');
         return;
@@ -1160,109 +1244,411 @@ function clearTerminal() {
     document.getElementById('terminal-output').innerHTML = '';
 }
 
-// Enhanced Flask-lite route testing function
-async function testFlaskRoute(path, method = 'GET', data = null, headers = null) {
+// Package installation and management functions
+async function handlePipInstall(command) {
+    const packageName = command.substring('pip install '.length).trim();
+    
+    if (!packageName) {
+        addToTerminal('Usage: pip install <package_name>', 'error');
+        return;
+    }
+    
     if (!pyodideReady) {
-        addToTerminal('Python is not ready yet', 'error');
+        addToTerminal('Python environment not ready. Please wait for Python to load.', 'error');
+        return;
+    }
+    
+    addToTerminal(`Installing Python package: ${packageName}`, 'info');
+    addToTerminal('This may take a moment...', 'log');
+    
+    try {
+        // Use micropip to install the package
+        await pyodide.runPythonAsync(`
+import micropip
+await micropip.install('${packageName}')
+        `);
+        
+        addToTerminal(`✓ Successfully installed ${packageName}`, 'info');
+        
+        // Update requirements.txt if it exists
+        if (files['requirements.txt']) {
+            const currentRequirements = files['requirements.txt'].content;
+            if (!currentRequirements.includes(packageName)) {
+                files['requirements.txt'].content += `\n${packageName}`;
+                syncFileToGun('requirements.txt');
+                addToTerminal(`Added ${packageName} to requirements.txt`, 'log');
+            }
+        } else {
+            // Create requirements.txt
+            files['requirements.txt'] = {
+                content: packageName,
+                type: 'txt'
+            };
+            syncFileToGun('requirements.txt');
+            addToTerminal('Created requirements.txt', 'log');
+            renderFileTree();
+        }
+        
+    } catch (error) {
+        addToTerminal(`✗ Failed to install ${packageName}: ${error.message}`, 'error');
+        addToTerminal('Package may not be available in Pyodide or may have compatibility issues', 'warn');
+    }
+}
+
+function handlePipCommand(command) {
+    const args = command.split(' ');
+    const subcommand = args[1];
+    
+    switch (subcommand) {
+        case 'list':
+            listPythonPackages();
+            break;
+        case 'show':
+            if (args[2]) {
+                showPythonPackageInfo(args[2]);
+            } else {
+                addToTerminal('Usage: pip show <package_name>', 'error');
+            }
+            break;
+        case 'freeze':
+            freezePythonPackages();
+            break;
+        case '--version':
+            addToTerminal('pip 23.0.1 (Pyodide micropip)', 'log');
+            break;
+        case 'help':
+            showPipHelp();
+            break;
+        default:
+            addToTerminal(`Unknown pip command: ${subcommand}`, 'error');
+            addToTerminal('Available pip commands: install, list, show, freeze, --version, help', 'info');
+    }
+}
+
+async function listPythonPackages() {
+    if (!pyodideReady) {
+        addToTerminal('Python environment not ready', 'error');
         return;
     }
     
     try {
-        // Check if Flask app exists
-        if (!flaskApp) {
-            addToTerminal('Flask-lite app not running. Run "python app.py" first.', 'error');
-            return;
-        }
-        
-        addToTerminal(`→ ${method} ${path}`, 'info');
-        
-        // Use Sippy-Cup style request handling
-        const response = handleRequest(method, path);
-        
-        // Convert response
-        const responseData = new TextDecoder().decode(response.value.body);
-        
-        // Color code status
-        let statusColor = 'log';
-        if (response.value.status >= 200 && response.value.status < 300) {
-            statusColor = 'info';
-        } else if (response.value.status >= 400) {
-            statusColor = 'error';
-        } else if (response.value.status >= 300) {
-            statusColor = 'warn';
-        }
-        
-        addToTerminal(`← ${response.value.status} ${getStatusText(response.value.status)}`, statusColor);
-        
-        // Show response data
-        if (responseData) {
-            addToTerminal('Response:', 'log');
-            
-            // Pretty print JSON if possible
-            try {
-                const jsonData = JSON.parse(responseData.trim());
-                addToTerminal(JSON.stringify(jsonData, null, 2), 'log');
-            } catch (e) {
-                // For HTML responses, show truncated version
-                if (responseData.includes('<!DOCTYPE') || responseData.includes('<html')) {
-                    addToTerminal('HTML Response (truncated):', 'log');
-                    addToTerminal(responseData.substring(0, 200) + '...', 'log');
-                } else {
-                    addToTerminal(responseData, 'log');
-                }
-            }
-        }
-        
-        // Show important headers
-        if (response.value.headers) {
-            const importantHeaders = ['Content-Type', 'Content-Length', 'Location', 'Set-Cookie'];
-            const relevantHeaders = {};
-            
-            for (const [key, value] of Object.entries(response.value.headers)) {
-                if (importantHeaders.includes(key)) {
-                    relevantHeaders[key] = value;
-                }
-            }
-            
-            if (Object.keys(relevantHeaders).length > 0) {
-                addToTerminal(`Headers: ${JSON.stringify(relevantHeaders, null, 2)}`, 'log');
-            }
-        }
-        
-        addToTerminal('', 'log'); // Empty line for spacing
+        await pyodide.runPythonAsync(`
+import micropip
+import json
+
+# Get list of installed packages
+installed = micropip.list()
+package_list = []
+
+for name, info in installed.items():
+    if hasattr(info, 'version'):
+        package_list.append(f"{name}=={info.version}")
+    else:
+        package_list.append(name)
+
+print("\\n".join(sorted(package_list)))
+        `);
         
     } catch (error) {
-        addToTerminal(`Request failed: ${error.message}`, 'error');
-        console.error('Flask-lite route test error:', error);
+        addToTerminal('Error listing packages: ' + error.message, 'error');
     }
 }
 
-// Helper function to get HTTP status text
-function getStatusText(status) {
-    const statusTexts = {
-        200: 'OK',
-        201: 'Created',
-        204: 'No Content',
-        400: 'Bad Request',
-        401: 'Unauthorized',
-        403: 'Forbidden',
-        404: 'Not Found',
-        405: 'Method Not Allowed',
-        500: 'Internal Server Error',
-        502: 'Bad Gateway',
-        503: 'Service Unavailable'
+async function showPythonPackageInfo(packageName) {
+    if (!pyodideReady) {
+        addToTerminal('Python environment not ready', 'error');
+        return;
+    }
+    
+    try {
+        await pyodide.runPythonAsync(`
+import micropip
+import importlib.metadata
+
+try:
+    metadata = importlib.metadata.metadata('${packageName}')
+    print(f"Name: {metadata['Name']}")
+    print(f"Version: {metadata['Version']}")
+    if 'Summary' in metadata:
+        print(f"Summary: {metadata['Summary']}")
+    if 'Home-page' in metadata:
+        print(f"Home-page: {metadata['Home-page']}")
+except Exception as e:
+    print(f"Package '${packageName}' not found or error: {e}")
+        `);
+        
+    } catch (error) {
+        addToTerminal(`Error getting package info: ${error.message}`, 'error');
+    }
+}
+
+async function freezePythonPackages() {
+    if (!pyodideReady) {
+        addToTerminal('Python environment not ready', 'error');
+        return;
+    }
+    
+    try {
+        await pyodide.runPythonAsync(`
+import micropip
+
+# Get list of installed packages
+installed = micropip.list()
+freeze_list = []
+
+for name, info in installed.items():
+    if hasattr(info, 'version'):
+        freeze_list.append(f"{name}=={info.version}")
+    else:
+        freeze_list.append(name)
+
+print("\\n".join(sorted(freeze_list)))
+        `);
+        
+    } catch (error) {
+        addToTerminal('Error freezing packages: ' + error.message, 'error');
+    }
+}
+
+async function handleNpmInstall(command) {
+    const packageName = command.substring('npm install '.length).trim();
+    
+    if (!packageName) {
+        addToTerminal('Usage: npm install <package_name>', 'error');
+        return;
+    }
+    
+    addToTerminal(`Simulating npm install: ${packageName}`, 'info');
+    addToTerminal('Note: This is a simulation. Actual npm packages cannot be installed in browser environment.', 'warn');
+    
+    // Simulate installation delay
+    setTimeout(() => {
+        addToTerminal(`✓ Simulated installation of ${packageName}`, 'log');
+        
+        // Update or create package.json
+        let packageJson;
+        if (files['package.json']) {
+            try {
+                packageJson = JSON.parse(files['package.json'].content);
+            } catch (e) {
+                packageJson = {
+                    "name": "hackmate-project",
+                    "version": "1.0.0",
+                    "dependencies": {}
+                };
+            }
+        } else {
+            packageJson = {
+                "name": "hackmate-project",
+                "version": "1.0.0",
+                "dependencies": {}
+            };
+        }
+        
+        // Add dependency
+        if (!packageJson.dependencies) {
+            packageJson.dependencies = {};
+        }
+        packageJson.dependencies[packageName] = "^1.0.0";
+        
+        // Update or create package.json file
+        files['package.json'] = {
+            content: JSON.stringify(packageJson, null, 2),
+            type: 'json'
+        };
+        
+        syncFileToGun('package.json');
+        addToTerminal(`Added ${packageName} to package.json`, 'log');
+        renderFileTree();
+        
+    }, 1000);
+}
+
+function handleNpmCommand(command) {
+    const args = command.split(' ');
+    const subcommand = args[1];
+    
+    switch (subcommand) {
+        case 'list':
+        case 'ls':
+            listNpmPackages();
+            break;
+        case 'init':
+            initNpmProject();
+            break;
+        case 'start':
+            addToTerminal('npm start: Running development server...', 'info');
+            addToTerminal('In a real environment, this would start your application', 'log');
+            break;
+        case 'test':
+            addToTerminal('npm test: Running tests...', 'info');
+            addToTerminal('No tests found. Create test files to run tests.', 'log');
+            break;
+        case 'build':
+            addToTerminal('npm build: Building project...', 'info');
+            addToTerminal('In a real environment, this would build your project for production', 'log');
+            break;
+        case '--version':
+            addToTerminal('npm 9.6.4 (simulated)', 'log');
+            break;
+        case 'help':
+            showNpmHelp();
+            break;
+        default:
+            addToTerminal(`Unknown npm command: ${subcommand}`, 'error');
+            addToTerminal('Available npm commands: install, list, init, start, test, build, --version, help', 'info');
+    }
+}
+
+function listNpmPackages() {
+    if (files['package.json']) {
+        try {
+            const packageJson = JSON.parse(files['package.json'].content);
+            if (packageJson.dependencies && Object.keys(packageJson.dependencies).length > 0) {
+                addToTerminal('Dependencies:', 'info');
+                for (const [name, version] of Object.entries(packageJson.dependencies)) {
+                    addToTerminal(`  ${name}@${version}`, 'log');
+                }
+            } else {
+                addToTerminal('No dependencies found', 'log');
+            }
+            
+            if (packageJson.devDependencies && Object.keys(packageJson.devDependencies).length > 0) {
+                addToTerminal('Dev Dependencies:', 'info');
+                for (const [name, version] of Object.entries(packageJson.devDependencies)) {
+                    addToTerminal(`  ${name}@${version}`, 'log');
+                }
+            }
+        } catch (e) {
+            addToTerminal('Error reading package.json: Invalid JSON', 'error');
+        }
+    } else {
+        addToTerminal('No package.json found. Run "npm init" to create one.', 'log');
+    }
+}
+
+function initNpmProject() {
+    const packageJson = {
+        "name": "hackmate-project",
+        "version": "1.0.0",
+        "description": "A HackMate collaborative coding project",
+        "main": "index.js",
+        "scripts": {
+            "start": "node server.js",
+            "test": "echo \"Error: no test specified\" && exit 1",
+            "build": "echo \"No build script specified\""
+        },
+        "dependencies": {},
+        "devDependencies": {},
+        "keywords": ["hackmate", "collaborative", "coding"],
+        "author": "HackMate User",
+        "license": "MIT"
     };
-    return statusTexts[status] || 'Unknown';
+    
+    files['package.json'] = {
+        content: JSON.stringify(packageJson, null, 2),
+        type: 'json'
+    };
+    
+    syncFileToGun('package.json');
+    addToTerminal('Created package.json', 'info');
+    renderFileTree();
 }
 
-// Listen for console messages from iframe
-window.addEventListener('message', function(event) {
-    if (event.data.type === 'console') {
-        addToConsole(event.data.args.join(' '), event.data.method);
-    }
-});
+function showPipHelp() {
+    addToTerminal('pip - Python Package Installer', 'info');
+    addToTerminal('', 'log');
+    addToTerminal('Available commands:', 'info');
+    addToTerminal('  pip install <package>    Install a Python package', 'log');
+    addToTerminal('  pip list                 List installed packages', 'log');
+    addToTerminal('  pip show <package>       Show package information', 'log');
+    addToTerminal('  pip freeze               Output installed packages in requirements format', 'log');
+    addToTerminal('  pip --version            Show pip version', 'log');
+    addToTerminal('  pip help                 Show this help message', 'log');
+    addToTerminal('', 'log');
+    addToTerminal('Examples:', 'info');
+    addToTerminal('  pip install requests', 'log');
+    addToTerminal('  pip install numpy pandas', 'log');
+    addToTerminal('  pip show flask', 'log');
+}
 
-// Console input handling
+function showNpmHelp() {
+    addToTerminal('npm - Node Package Manager (Simulated)', 'info');
+    addToTerminal('', 'log');
+    addToTerminal('Available commands:', 'info');
+    addToTerminal('  npm install <package>    Install a package (simulated)', 'log');
+    addToTerminal('  npm list                 List installed packages', 'log');
+    addToTerminal('  npm init                 Create package.json', 'log');
+    addToTerminal('  npm start                Run start script', 'log');
+    addToTerminal('  npm test                 Run test script', 'log');
+    addToTerminal('  npm build                Run build script', 'log');
+    addToTerminal('  npm --version            Show npm version', 'log');
+    addToTerminal('  npm help                 Show this help message', 'log');
+    addToTerminal('', 'log');
+}
+
+function showTerminalHelp() {
+    addToTerminal('HackMate Terminal - Available Commands', 'info');
+    addToTerminal('', 'log');
+    addToTerminal('File Operations:', 'info');
+    addToTerminal('  ls                       List files in workspace', 'log');
+    addToTerminal('  pwd                      Show current directory', 'log');
+    addToTerminal('  cat <filename>           Display file contents', 'log');
+    addToTerminal('  clear                    Clear terminal output', 'log');
+    addToTerminal('', 'log');
+    addToTerminal('Python & Flask:', 'info');
+    addToTerminal('  python app.py            Start Flask-lite server', 'log');
+    addToTerminal('  pip install <package>    Install Python package', 'log');
+    addToTerminal('  pip list                 List Python packages', 'log');
+    addToTerminal('  pip help                 Show pip help', 'log');
+    addToTerminal('', 'log');
+    addToTerminal('Node.js & npm (Simulated):', 'info');
+    addToTerminal('  npm install <package>    Simulate npm package install', 'log');
+    addToTerminal('  npm list                 List npm packages', 'log');
+    addToTerminal('  npm init                 Create package.json', 'log');
+    addToTerminal('  npm help                 Show npm help', 'log');
+    addToTerminal('', 'log');
+    addToTerminal('HTTP Testing:', 'info');
+    addToTerminal('  curl <path>              Test Flask routes', 'log');
+    addToTerminal('  curl POST <path> <data>  Test POST requests', 'log');
+    addToTerminal('', 'log');
+    addToTerminal('General:', 'info');
+    addToTerminal('  help                     Show this help message', 'log');
+}
+
+// Initialize with welcome messages
+setTimeout(() => {
+    addToConsole('Welcome to HackMate Console! Type JavaScript or Python code and press Enter to execute.', 'info');
+    addToConsole('You can also see console output from your code here.', 'info');
+    addToConsole('Python support is loading... Please wait for "Python Ready" status.', 'info');
+    
+    addToTerminal('Welcome to HackMate Terminal!', 'info');
+    addToTerminal('🚀 New: Use "Deploy" button to create shareable links for your project!', 'info');
+    addToTerminal('Available commands:', 'info');
+    addToTerminal('  ls - list files', 'log');
+    addToTerminal('  pwd - current directory', 'log');
+    addToTerminal('  cat <filename> - view file contents', 'log');
+    addToTerminal('  clear - clear terminal', 'log');
+    addToTerminal('  python app.py - start Flask app', 'log');
+    addToTerminal('  pip install <package> - install Python packages', 'log');
+    addToTerminal('  npm install <package> - install npm packages (simulated)', 'log');
+    addToTerminal('  curl [METHOD] <path> [data] - test Flask routes', 'log');
+    addToTerminal('  help - show all available commands', 'log');
+    addToTerminal('', 'log');
+    addToTerminal('Package Management:', 'info');
+    addToTerminal('• Real Python package installation via pip', 'log');
+    addToTerminal('• Simulated npm package management', 'log');
+    addToTerminal('• Automatic requirements.txt and package.json updates', 'log');
+    addToTerminal('• Package listing and information commands', 'log');
+    addToTerminal('', 'log');
+    addToTerminal('Examples:', 'info');
+    addToTerminal('  pip install requests numpy pandas', 'log');
+    addToTerminal('  npm install express lodash', 'log');
+    addToTerminal('  pip list, npm list', 'log');
+    addToTerminal('  python app.py, then curl /api/data', 'log');
+}, 1000);
+
+// Console and Terminal input handling
 document.addEventListener('DOMContentLoaded', function() {
     const consoleInput = document.getElementById('console-input');
     const terminalInput = document.getElementById('terminal-input');
@@ -1305,13 +1691,13 @@ document.addEventListener('DOMContentLoaded', function() {
     }
     
     if (terminalInput) {
-        terminalInput.addEventListener('keypress', function(event) {
+        terminalInput.addEventListener('keypress', async function(event) {
             if (event.key === 'Enter') {
                 const command = this.value.trim();
                 if (command) {
                     addToTerminal('$ ' + command, 'info');
                     
-                    // Simple command simulation
+                    // Handle terminal commands
                     if (command === 'ls') {
                         addToTerminal(Object.keys(files).join('  '), 'log');
                     } else if (command === 'pwd') {
@@ -1331,7 +1717,6 @@ document.addEventListener('DOMContentLoaded', function() {
                         // Enhanced curl command parsing
                         const curlArgs = command.substring(5).trim();
                         
-                        // Parse curl command with various formats
                         if (curlArgs.length === 0) {
                             addToTerminal('Usage: curl [METHOD] <path> [data]', 'error');
                             addToTerminal('Examples:', 'info');
@@ -1383,10 +1768,23 @@ document.addEventListener('DOMContentLoaded', function() {
                         }
                         
                         testFlaskRoute(path, method, data);
+                    } else if (command.startsWith('pip install ')) {
+                        await handlePipInstall(command);
+                    } else if (command.startsWith('pip ')) {
+                        handlePipCommand(command);
+                    } else if (command.startsWith('npm install ')) {
+                        await handleNpmInstall(command);
+                    } else if (command.startsWith('npm ')) {
+                        handleNpmCommand(command);
+                    } else if (command === 'pip list') {
+                        await listPythonPackages();
+                    } else if (command === 'npm list') {
+                        listNpmPackages();
+                    } else if (command === 'help' || command === '--help') {
+                        showTerminalHelp();
                     } else {
                         addToTerminal(`Command not found: ${command}`, 'error');
-                        addToTerminal('Available commands: ls, pwd, cat <filename>, clear, python app.py, curl [METHOD] <path> [data]', 'info');
-                        addToTerminal('Flask testing: Start Flask with "python app.py", then use curl commands', 'info');
+                        addToTerminal('Type "help" for available commands', 'info');
                     }
                     
                     this.value = '';
@@ -1396,109 +1794,228 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 });
 
-// Panel resizing functionality
-function initializePanelResizing() {
-    const resizeHandles = document.querySelectorAll('.resize-handle');
-    let isResizing = false;
-    let currentHandle = null;
-    let startX = 0;
-    let startWidth = 0;
-    let targetPanel = null;
+// Listen for console messages from iframe
+window.addEventListener('message', function(event) {
+    if (event.data.type === 'console') {
+        addToConsole(event.data.args.join(' '), event.data.method);
+    }
+});
+
+// Deploy functionality
+function deployApp() {
+    updateDeployInfo();
+    document.getElementById('deploy-modal').style.display = 'block';
+}
+
+function hideDeployModal() {
+    document.getElementById('deploy-modal').style.display = 'none';
+}
+
+// Close modal when clicking outside of it
+document.addEventListener('click', function(event) {
+    const deployModal = document.getElementById('deploy-modal');
+    const newFileModal = document.getElementById('new-file-modal');
     
-    resizeHandles.forEach(handle => {
-        handle.addEventListener('mousedown', (e) => {
-            isResizing = true;
-            currentHandle = handle;
-            startX = e.clientX;
-            
-            const direction = handle.getAttribute('data-direction');
-            if (direction === 'sidebar') {
-                targetPanel = document.getElementById('sidebar');
-                startWidth = targetPanel.offsetWidth;
-            } else if (direction === 'editor') {
-                targetPanel = document.getElementById('output-panel');
-                startWidth = targetPanel.offsetWidth;
-            }
-            
-            document.body.classList.add('resizing');
-            e.preventDefault();
-        });
-    });
+    if (event.target === deployModal) {
+        hideDeployModal();
+    }
     
-    document.addEventListener('mousemove', (e) => {
-        if (!isResizing || !currentHandle || !targetPanel) return;
+    if (event.target === newFileModal) {
+        hideNewFileModal();
+    }
+});
+
+// Close modal with Escape key
+document.addEventListener('keydown', function(event) {
+    if (event.key === 'Escape') {
+        const deployModal = document.getElementById('deploy-modal');
+        const newFileModal = document.getElementById('new-file-modal');
         
-        const direction = currentHandle.getAttribute('data-direction');
-        const deltaX = e.clientX - startX;
-        
-        if (direction === 'sidebar') {
-            // Resizing sidebar
-            const newWidth = startWidth + deltaX;
-            const minWidth = 150;
-            const maxWidth = 500;
-            
-            if (newWidth >= minWidth && newWidth <= maxWidth) {
-                targetPanel.style.width = newWidth + 'px';
-            }
-        } else if (direction === 'editor') {
-            // Resizing output panel (resize from right side, so subtract delta)
-            const newWidth = startWidth - deltaX;
-            const minWidth = 200;
-            const maxWidth = 800;
-            
-            if (newWidth >= minWidth && newWidth <= maxWidth) {
-                targetPanel.style.width = newWidth + 'px';
-            }
+        if (deployModal.style.display === 'block') {
+            hideDeployModal();
         }
         
-        // Refresh CodeMirror when resizing
-        if (codeMirrorInstance) {
+        if (newFileModal.style.display === 'block') {
+            hideNewFileModal();
+        }
+    }
+});
+
+function updateDeployInfo() {
+    const baseUrl = window.location.origin + window.location.pathname;
+    const roomHash = '#' + roomId;
+    const viewOnlyHash = '#view-' + roomId;
+    
+    // Update collaborative link
+    document.getElementById('collab-link').value = baseUrl + roomHash;
+    
+    // Update preview link (read-only)
+    document.getElementById('preview-link').value = baseUrl + viewOnlyHash;
+    
+    // Update project stats
+    document.getElementById('deploy-room-id').textContent = roomId;
+    document.getElementById('deploy-file-count').textContent = Object.keys(files).length;
+    document.getElementById('deploy-created-date').textContent = new Date().toLocaleDateString();
+}
+
+function copyToClipboard(inputId) {
+    const input = document.getElementById(inputId);
+    const button = input.nextElementSibling;
+    
+    input.select();
+    input.setSelectionRange(0, 99999); // For mobile devices
+    
+    try {
+        navigator.clipboard.writeText(input.value).then(() => {
+            button.textContent = 'Copied!';
+            button.classList.add('copied');
             setTimeout(() => {
-                codeMirrorInstance.refresh();
-            }, 10);
-        }
+                button.textContent = 'Copy';
+                button.classList.remove('copied');
+            }, 2000);
+        });
+    } catch (err) {
+        // Fallback for older browsers
+        document.execCommand('copy');
+        button.textContent = 'Copied!';
+        button.classList.add('copied');
+        setTimeout(() => {
+            button.textContent = 'Copy';
+            button.classList.remove('copied');
+        }, 2000);
+    }
+}
+
+function downloadProject() {
+    try {
+        // Create a simple archive file with all project files
+        const projectData = createProjectArchive();
+        const blob = new Blob([projectData], { type: 'text/plain' });
+        
+        // Create download link
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `hackmate-project-${roomId}.txt`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+        
+        addToConsole(`Project downloaded as hackmate-project-${roomId}.txt`, 'info');
+    } catch (error) {
+        console.error('Error creating project archive:', error);
+        // Fallback: download as individual files
+        downloadAsIndividualFiles();
+    }
+}
+
+function createProjectArchive() {
+    let archive = `HackMate Project Archive
+Room ID: ${roomId}
+Created: ${new Date().toISOString()}
+Files: ${Object.keys(files).length}
+
+${'='.repeat(80)}
+
+`;
+    
+    Object.keys(files).forEach(filename => {
+        const fileContent = files[filename].content;
+        archive += `--- FILE: ${filename} ---\n`;
+        archive += `Type: ${files[filename].type}\n`;
+        archive += `Length: ${fileContent.length} characters\n`;
+        archive += `${'='.repeat(40)}\n`;
+        archive += fileContent;
+        archive += `\n${'='.repeat(40)}\n\n`;
     });
     
-    document.addEventListener('mouseup', () => {
-        if (isResizing) {
-            isResizing = false;
-            currentHandle = null;
-            targetPanel = null;
-            document.body.classList.remove('resizing');
+    archive += `End of Archive\n${'='.repeat(80)}`;
+    
+    return archive;
+}
+
+function downloadAsIndividualFiles() {
+    addToConsole('Downloading individual files...', 'info');
+    
+    // Download each file individually
+    Object.keys(files).forEach((filename, index) => {
+        setTimeout(() => {
+            const content = files[filename].content;
+            const blob = new Blob([content], { type: 'text/plain' });
+            const url = URL.createObjectURL(blob);
             
-            // Final CodeMirror refresh
-            if (codeMirrorInstance) {
-                setTimeout(() => {
-                    codeMirrorInstance.refresh();
-                }, 100);
-            }
-        }
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = filename;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+            
+            addToConsole(`Downloaded: ${filename}`, 'info');
+        }, index * 100); // Stagger downloads to avoid browser blocking
     });
 }
 
-// Initialize with welcome messages
-setTimeout(() => {
-    addToConsole('Welcome to HackMate Console! Type JavaScript or Python code and press Enter to execute.', 'info');
-    addToConsole('You can also see console output from your code here.', 'info');
-    addToConsole('Python support is loading... Please wait for "Python Ready" status.', 'info');
+// Enhanced room ID handling for read-only mode
+function initializeRoomWithViewMode() {
+    const hash = location.hash.replace('#', '');
     
-    addToTerminal('Welcome to HackMate Terminal!', 'info');
-    addToTerminal('Available commands:', 'info');
-    addToTerminal('  ls - list files', 'log');
-    addToTerminal('  pwd - current directory', 'log');
-    addToTerminal('  cat <filename> - view file contents', 'log');
-    addToTerminal('  clear - clear terminal', 'log');
-    addToTerminal('  python app.py - start Flask app', 'log');
-    addToTerminal('  curl [METHOD] <path> [data] - test Flask routes', 'log');
-    addToTerminal('  curl /, curl POST /api/users {"name": "Alice"}', 'log');
-    addToTerminal('  curl PUT /api/users/1 {"name": "Bob"}', 'log');
-    addToTerminal('  curl DELETE /api/users/1', 'log');
-    addToTerminal('', 'log');
-    addToTerminal('Enhanced Flask Features:', 'info');
-    addToTerminal('• Async request handling', 'log');
-    addToTerminal('• JSON response formatting', 'log');
-    addToTerminal('• Proper HTTP status codes', 'log');
-    addToTerminal('• Error handling and debugging', 'log');
-    addToTerminal('', 'log');
-    addToTerminal('Example: python app.py, then curl /api/data', 'info');
-}, 1000);
+    if (hash.startsWith('view-')) {
+        // Read-only mode
+        roomId = hash.substring(5); // Remove 'view-' prefix
+        isReadOnly = true;
+        document.body.classList.add('read-only-mode');
+        
+        // Update UI to show read-only status
+        document.getElementById('room-id').textContent = roomId + ' (View Only)';
+        document.getElementById('sync-status').textContent = 'Read Only Mode';
+        document.getElementById('sync-status').className = 'sync-status ready';
+        
+        // Hide editing controls
+        document.querySelector('.new-file-btn').style.display = 'none';
+        document.querySelector('.deploy-button').style.display = 'none';
+        
+    } else {
+        // Normal collaborative mode
+        roomId = hash || Math.random().toString(36).substring(2, 8);
+        isReadOnly = false;
+    }
+    
+    location.hash = (isReadOnly ? 'view-' : '') + roomId;
+    if (!isReadOnly) {
+        document.getElementById('room-id').textContent = roomId;
+    }
+}
+
+// Initialize read-only mode handling
+// Room already initialized above
+
+// Add read-only mode styles
+const readOnlyStyles = `
+.read-only-mode .code-editor {
+    background: #1e1e1e !important;
+    color: #cccccc !important;
+    cursor: default !important;
+}
+
+.read-only-mode .new-file-btn,
+.read-only-mode .deploy-button {
+    display: none !important;
+}
+
+.read-only-mode .run-button,
+.read-only-mode .flask-button {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+`;
+
+// Inject read-only styles
+const styleSheet = document.createElement('style');
+styleSheet.textContent = readOnlyStyles;
+document.head.appendChild(styleSheet);
+
+// Add deployment status to console
+addToConsole('🚀 Deploy feature available! Click "Deploy" to share your project.', 'info');

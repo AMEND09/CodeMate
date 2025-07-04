@@ -482,6 +482,22 @@ body {
     background: #218838;
 }
 
+.deploy-button {
+    background: #6f42c1;
+    color: white;
+    border: none;
+    padding: 8px 16px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 12px;
+    transition: background 0.2s;
+    margin-left: 5px;
+}
+
+.deploy-button:hover {
+    background: #5a359a;
+}
+
 .status-bar {
     background: #007acc;
     color: white;
@@ -526,11 +542,15 @@ body {
 
 .modal-content {
     background-color: #2d2d30;
-    margin: 15% auto;
+    margin: 5% auto;
     padding: 20px;
     border-radius: 5px;
-    width: 400px;
+    width: 90%;
+    max-width: 600px;
+    max-height: 80vh;
+    overflow-y: auto;
     color: #d4d4d4;
+    position: relative;
 }
 
 .modal-header {
@@ -538,11 +558,14 @@ body {
     justify-content: space-between;
     align-items: center;
     margin-bottom: 20px;
+    border-bottom: 1px solid #3e3e42;
+    padding-bottom: 15px;
 }
 
 .modal-title {
     font-size: 18px;
     font-weight: bold;
+    margin: 0;
 }
 
 .close {
@@ -550,6 +573,12 @@ body {
     font-size: 28px;
     font-weight: bold;
     cursor: pointer;
+    line-height: 1;
+    transition: color 0.2s;
+}
+
+.close:hover {
+    color: #ffffff;
 }
 
 .close:hover {
@@ -745,4 +774,104 @@ body {
         width: 100%;
         height: 300px;
     }
+}
+
+/* Deploy Modal Styles */
+.deploy-info {
+    margin: 20px 0;
+}
+
+.deploy-option {
+    margin-bottom: 20px;
+    padding: 15px;
+    background: #1e1e1e;
+    border-radius: 8px;
+    border: 1px solid #3e3e42;
+}
+
+.deploy-option h4 {
+    margin: 0 0 10px 0;
+    color: #ffffff;
+    font-size: 16px;
+}
+
+.deploy-option p {
+    margin: 0 0 10px 0;
+    color: #cccccc;
+    font-size: 14px;
+    line-height: 1.4;
+}
+
+.link-container {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    margin-top: 10px;
+}
+
+.link-container input {
+    flex: 1;
+    padding: 10px 12px;
+    background: #2d2d30;
+    border: 1px solid #3e3e42;
+    color: #ffffff;
+    border-radius: 4px;
+    font-family: monospace;
+    font-size: 12px;
+}
+
+.link-container input:focus {
+    outline: none;
+    border-color: #007acc;
+}
+
+.copy-btn {
+    background: #0e639c;
+    color: white;
+    border: none;
+    padding: 10px 16px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 12px;
+    transition: background 0.2s;
+    white-space: nowrap;
+}
+
+.copy-btn:hover {
+    background: #1177bb;
+}
+
+.copy-btn.copied {
+    background: #28a745;
+}
+
+.deploy-stats {
+    background: #2d2d30;
+    padding: 15px;
+    border-radius: 8px;
+    border: 1px solid #3e3e42;
+    margin-top: 20px;
+}
+
+.deploy-stats p {
+    margin: 0 0 10px 0;
+    color: #ffffff;
+    font-weight: bold;
+}
+
+.deploy-stats ul {
+    margin: 0;
+    padding-left: 20px;
+    color: #cccccc;
+}
+
+.deploy-stats li {
+    margin: 5px 0;
+    font-size: 14px;
+}
+
+.deploy-stats span {
+    color: #ffd700;
+    font-family: monospace;
+    font-weight: bold;
 }
