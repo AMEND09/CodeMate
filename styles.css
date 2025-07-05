@@ -1095,6 +1095,32 @@ body {
     font-weight: bold;
 }
 
+.database-type-selector {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.database-type-selector label {
+    font-size: 11px;
+    color: #cccccc;
+}
+
+.database-type-selector select {
+    background: #3e3e42;
+    color: #cccccc;
+    border: 1px solid #5a5a5a;
+    padding: 4px 8px;
+    border-radius: 3px;
+    font-size: 11px;
+    cursor: pointer;
+}
+
+.database-type-selector select:focus {
+    outline: none;
+    border-color: #569cd6;
+}
+
 .database-actions {
     display: flex;
     gap: 8px;
@@ -1267,21 +1293,84 @@ body {
     cursor: pointer;
     font-size: 12px;
     font-weight: bold;
+    transition: background 0.2s;
 }
 
 .database-input button:hover {
-    background: #4fc3f7;
+    background: #4db8e8;
 }
 
-.database-empty {
-    text-align: center;
-    padding: 40px 20px;
-    color: #808080;
-    font-style: italic;
+/* SQL Table Styles */
+.sql-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-top: 10px;
+    font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+    font-size: 11px;
 }
 
-.database-empty-icon {
-    font-size: 48px;
-    margin-bottom: 16px;
-    opacity: 0.5;
+.sql-table th {
+    background: #2d2d30;
+    color: #cccccc;
+    padding: 8px;
+    text-align: left;
+    border: 1px solid #3e3e42;
+    font-weight: bold;
+}
+
+.sql-table td {
+    background: #1e1e1e;
+    color: #d4d4d4;
+    padding: 6px 8px;
+    border: 1px solid #3e3e42;
+    max-width: 200px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.sql-table tr:nth-child(even) td {
+    background: #252526;
+}
+
+.sql-table tr:hover td {
+    background: #2d2d30;
+}
+
+.sql-query-result {
+    margin-top: 10px;
+    padding: 10px;
+    background: #252526;
+    border: 1px solid #3e3e42;
+    border-radius: 3px;
+    font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+    font-size: 11px;
+}
+
+.sql-query-success {
+    color: #4caf50;
+}
+
+.sql-query-error {
+    color: #e57373;
+}
+
+.sql-schema-viewer {
+    margin-bottom: 10px;
+    padding: 10px;
+    background: #2d2d30;
+    border-radius: 3px;
+}
+
+.sql-schema-table {
+    background: #3e3e42;
+    padding: 4px 8px;
+    margin: 2px 0;
+    border-radius: 2px;
+    cursor: pointer;
+    font-size: 11px;
+}
+
+.sql-schema-table:hover {
+    background: #4e4e52;
 }

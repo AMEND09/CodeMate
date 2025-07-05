@@ -76,6 +76,13 @@
                 <div class="database-container hidden" id="database-container">
                     <div class="database-header">
                         <span class="database-title">Database</span>
+                        <div class="database-type-selector">
+                            <label for="db-type-select">Type:</label>
+                            <select id="db-type-select" onchange="switchDatabaseType(this.value)">
+                                <option value="nosql">NoSQL (Gun.js)</option>
+                                <option value="sql">SQL (SQLite)</option>
+                            </select>
+                        </div>
                         <div class="database-actions">
                             <button class="db-refresh-btn" onclick="refreshDatabase()">🔄 Refresh</button>
                             <button class="db-add-btn" onclick="showAddDataModal()">+ Add</button>
@@ -90,10 +97,16 @@
                             <!-- Database entries will be populated here -->
                         </div>
                     </div>
-                    <div class="database-input">
+                    <!-- NoSQL Input -->
+                    <div class="database-input" id="nosql-input">
                         <input type="text" id="database-key-input" placeholder="Key" style="width: 30%;">
                         <input type="text" id="database-value-input" placeholder="Value (JSON supported)" style="width: 50%;">
                         <button onclick="addDatabaseEntry()" style="width: 15%;">Add</button>
+                    </div>
+                    <!-- SQL Input -->
+                    <div class="database-input hidden" id="sql-input">
+                        <input type="text" id="sql-query-input" placeholder="SQL Query (e.g., SELECT * FROM users)" style="width: 80%;">
+                        <button onclick="executeSQLQuery()" style="width: 15%;">Execute</button>
                     </div>
                 </div>
             </div>
@@ -203,6 +216,8 @@
 
     <script src="https://cdn.jsdelivr.net/npm/gun@0.2020.1240/gun.js"></script>
     <script src="https://cdn.jsdelivr.net/pyodide/v0.24.1/full/pyodide.js"></script>
+    <!-- SQL.js for SQLite in browser -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.8.0/sql-wasm.js"></script>
     <!-- CodeMirror for syntax highlighting -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.15/codemirror.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.15/mode/javascript/javascript.min.js"></script>

@@ -113,7 +113,7 @@ function setUsername() {
     setupUserSync();
     
     // Initialize the rest of the app
-    initializeApp();
+    initializeApp().catch(console.error);
 }
 
 function setupUserSync() {
@@ -147,32 +147,131 @@ function setupUserSync() {
         }
     });
     
-    // Clean up when user leaves
-    window.addEventListener('beforeunload', () => {
+    // Clean up when user leaves - multiple methods for reliability
+    function cleanupCurrentUser() {
         if (currentUser) {
+            console.log('Cleaning up current user:', currentUser.name);
             usersRef.get(currentUser.id).put(null);
+            
+            // Also remove from local map if it's there
+            users.delete(currentUser.id);
+            updateActiveUsers();
+            updateFileEditors();
+        }
+    }
+    
+    // Primary cleanup method
+    window.addEventListener('beforeunload', () => {
+        cleanupCurrentUser();
+    });
+    
+    // Secondary cleanup method using sendBeacon for better reliability
+    window.addEventListener('beforeunload', () => {
+        if (currentUser && navigator.sendBeacon) {
+            // This is more reliable than the above method
+            const data = JSON.stringify({ 
+                action: 'user_leaving', 
+                userId: currentUser.id,
+                roomId: roomId 
+            });
+            // Note: We can't use Gun here since sendBeacon needs a URL
+            // But the above method should work for Gun cleanup
         }
     });
     
-    // Periodic heartbeat to show user is active
+    // Backup cleanup when page becomes hidden
+    document.addEventListener('visibilitychange', () => {
+        if (document.hidden && currentUser) {
+            console.log('Page hidden - potential user leaving');
+            currentUser.potentiallyLeft = Date.now();
+            userRef.put(currentUser);
+            
+            // If page stays hidden for too long, assume user left
+            setTimeout(() => {
+                if (document.hidden && currentUser) {
+                    console.log('Page hidden too long, cleaning up user');
+                    cleanupCurrentUser();
+                }
+            }, 8000); // 8 seconds
+            
+        } else if (!document.hidden && currentUser) {
+            console.log('Page visible - user returned');
+            delete currentUser.potentiallyLeft;
+            currentUser.lastActive = Date.now();
+            userRef.put(currentUser);
+        }
+    });
+    
+    // Cleanup on window focus/blur
+    window.addEventListener('blur', () => {
+        if (currentUser) {
+            console.log('Window lost focus');
+            currentUser.windowBlurred = Date.now();
+            userRef.put(currentUser);
+        }
+    });
+    
+    window.addEventListener('focus', () => {
+        if (currentUser) {
+            console.log('Window gained focus');
+            delete currentUser.windowBlurred;
+            currentUser.lastActive = Date.now();
+            userRef.put(currentUser);
+        }
+    });
+    
+    // More frequent heartbeat to show user is active
     setInterval(() => {
         if (currentUser) {
             currentUser.lastActive = Date.now();
             userRef.put(currentUser);
         }
-    }, 5000);
+    }, 3000); // Every 3 seconds instead of 5 for more responsive presence
     
-    // Clean up inactive users
+    // More aggressive cleanup of inactive users
     setInterval(() => {
         const now = Date.now();
+        let removedUsers = 0;
+        
         users.forEach((user, userId) => {
-            if (user.lastActive && now - user.lastActive > 15000) { // 15 seconds
+            // Skip current user
+            if (userId === currentUser?.id) return;
+            
+            let shouldRemove = false;
+            
+            // Remove if user hasn't been active for 15 seconds
+            if (user.lastActive && now - user.lastActive > 15000) {
+                shouldRemove = true;
+                console.log(`Removing inactive user: ${user.name} (last active ${Math.round((now - user.lastActive)/1000)}s ago)`);
+            }
+            
+            // Remove if user's page has been hidden for 10 seconds
+            if (user.potentiallyLeft && now - user.potentiallyLeft > 10000) {
+                shouldRemove = true;
+                console.log(`Removing user who left: ${user.name} (page hidden ${Math.round((now - user.potentiallyLeft)/1000)}s ago)`);
+            }
+            
+            // Remove if user's window has been blurred for 30 seconds (less aggressive)
+            if (user.windowBlurred && now - user.windowBlurred > 30000) {
+                shouldRemove = true;
+                console.log(`Removing long-inactive user: ${user.name} (window blurred ${Math.round((now - user.windowBlurred)/1000)}s ago)`);
+            }
+            
+            if (shouldRemove) {
                 users.delete(userId);
-                updateActiveUsers();
-                updateFileEditors();
+                removedUsers++;
+                
+                // Also remove from Gun to clean up the database
+                usersRef.get(userId).put(null);
             }
         });
-    }, 10000);
+        
+        if (removedUsers > 0) {
+            console.log(`Cleaned up ${removedUsers} inactive users`);
+            updateActiveUsers();
+            updateFileEditors();
+        }
+    }, 5000); // Check every 5 seconds instead of 10 for faster cleanup
 }
 
 function updateActiveUsers() {
@@ -319,7 +418,7 @@ function updateUserActiveFile(filename) {
     }
 }
 
-function initializeApp() {
+async function initializeApp() {
     // This will be called after username is set or for read-only mode
     renderFileTree();
     renderTabs();
@@ -327,7 +426,7 @@ function initializeApp() {
     initializePanelResizing();
     
     // Initialize database
-    initializeDatabase();
+    await initializeDatabase();
     
     console.log('App initialized with user:', currentUser);
 }
@@ -358,7 +457,7 @@ if (!isReadOnly) {
     }
 } else {
     // For read-only mode, initialize app directly
-    initializeApp();
+    initializeApp().catch(console.error);
 }
 
 // File system and state management
@@ -598,9 +697,105 @@ asyncio.create_task(database_demo())
 
 # You can also use these commands in the terminal:
 # db set py_message "Hello from Python!"
-# db get py_message
-# db list`,
+// db get py_message
+// db list`,
         type: 'python'
+    },
+    'sql_examples.sql': {
+        content: `-- SQL Database Examples for CodeMate
+-- This file demonstrates how to use the SQL database in CodeMate
+
+-- 1. Create a simple users table
+CREATE TABLE users (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    email TEXT UNIQUE,
+    age INTEGER,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+-- 2. Insert some sample data
+INSERT INTO users (name, email, age) VALUES 
+    ('Alice Johnson', 'alice@example.com', 28),
+    ('Bob Smith', 'bob@example.com', 32),
+    ('Carol Davis', 'carol@example.com', 25),
+    ('David Wilson', 'david@example.com', 35);
+
+-- 3. Create a posts table with foreign key
+CREATE TABLE posts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    title TEXT NOT NULL,
+    content TEXT,
+    user_id INTEGER,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (user_id) REFERENCES users (id)
+);
+
+-- 4. Insert some posts
+INSERT INTO posts (title, content, user_id) VALUES 
+    ('Welcome to CodeMate', 'This is my first post using the SQL database!', 1),
+    ('Learning SQL', 'SQL is really powerful for data management.', 2),
+    ('Collaborative Coding', 'I love how we can share databases in real-time.', 1),
+    ('Database Design', 'Proper schema design is crucial for applications.', 3);
+
+-- Example queries:
+-- SELECT * FROM users;
+-- SELECT u.name, COUNT(p.id) as posts FROM users u LEFT JOIN posts p ON u.id = p.user_id GROUP BY u.id;`,
+        type: 'sql'
+    },
+    'dual_database_example.js': {
+        content: `// Dual Database Example for CodeMate
+// This example shows how to use both NoSQL (Gun.js) and SQL (SQLite) databases
+
+async function dualDatabaseDemo() {
+    console.log('=== CodeMate Dual Database Demo ===');
+    
+    // NoSQL Database (Gun.js) Examples
+    console.log('\\n--- NoSQL Database Examples ---');
+    
+    await db.set('app_name', 'CodeMate');
+    await db.set('version', '2.0');
+    await db.set('features', ['real-time collaboration', 'dual databases', 'code execution']);
+    
+    const appName = await db.get('app_name');
+    const version = await db.get('version');
+    console.log('App:', appName, 'v' + version);
+    
+    // SQL Database (SQLite) Examples
+    console.log('\\n--- SQL Database Examples ---');
+    
+    // Create and populate products table
+    await sqlDb.exec(\`
+        CREATE TABLE IF NOT EXISTS products (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL,
+            price DECIMAL(10,2),
+            category TEXT
+        )
+    \`);
+    
+    await sqlDb.exec(\`
+        INSERT INTO products (name, price, category) VALUES 
+        ('MacBook Pro', 1999.99, 'Laptops'),
+        ('iPhone 15', 999.99, 'Phones'),
+        ('iPad Air', 599.99, 'Tablets')
+    \`);
+    
+    const products = await sqlDb.query('SELECT * FROM products ORDER BY price DESC');
+    console.log('Products loaded:', products.length > 0 ? products[0].values.length : 0, 'items');
+    
+    console.log('\\n=== Demo Complete ===');
+    console.log('Both databases are ready! Switch between them in the Database panel.');
+}
+
+// Run the demo
+dualDatabaseDemo().catch(console.error);
+
+// Terminal examples:
+// db set user_count 150
+// db sql SELECT COUNT(*) as total FROM products;
+// db sql INSERT INTO products (name, price, category) VALUES ('New Item', 99.99, 'Gadgets');`,
+        type: 'js'
     }
 };
 
@@ -2021,7 +2216,7 @@ function showPipHelp() {
     addToTerminal('  pip freeze               Output installed packages in requirements format', 'log');
     addToTerminal('  pip --version            Show pip version', 'log');
     addToTerminal('  pip help                 Show this help message', 'log');
-    addToTerminal('', 'log');
+       addToTerminal('', 'log');
     addToTerminal('Examples:', 'info');
     addToTerminal('  pip install requests', 'log');
     addToTerminal('  pip install numpy pandas', 'log');
@@ -2769,24 +2964,386 @@ class CodeMateDB {
     }
 }
 
+// SQL Database functionality using SQL.js
+class CodeMateSQLDB {
+    constructor(roomId) {
+        this.roomId = roomId;
+        this.db = null;
+        this.isReady = false;
+        this.initPromise = this.initialize();
+        console.log('CodeMateSQLDB initializing for room:', roomId);
+    }
+
+    async initialize() {
+        try {
+            // Wait for SQL.js to be loaded
+            if (typeof initSqlJs === 'undefined') {
+                console.log('Waiting for SQL.js to load...');
+                let attempts = 0;
+                while (typeof initSqlJs === 'undefined' && attempts < 100) {
+                    await new Promise(resolve => setTimeout(resolve, 100));
+                    attempts++;
+                }
+                
+                if (typeof initSqlJs === 'undefined') {
+                    throw new Error('SQL.js failed to load after timeout');
+                }
+            }
+
+            console.log('SQL.js found, initializing...');
+
+            // Initialize SQL.js
+            const SQL = await initSqlJs({
+                // Use CDN version
+                locateFile: file => `https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.8.0/${file}`
+            });
+
+            console.log('SQL.js initialized successfully');
+
+            // Create or restore database
+            const savedData = await this.loadFromGun();
+            if (savedData) {
+                this.db = new SQL.Database(new Uint8Array(savedData));
+                console.log('SQL Database restored from Gun.js');
+            } else {
+                this.db = new SQL.Database();
+                console.log('New SQL Database created');
+                await this.createDefaultTables();
+            }
+
+            this.isReady = true;
+            console.log('SQL Database ready for room:', this.roomId);
+            
+            // Setup periodic sync to Gun.js
+            this.setupSync();
+            
+        } catch (error) {
+            console.error('Failed to initialize SQL database:', error);
+            this.isReady = false;
+            throw error;
+        }
+    }
+
+    async createDefaultTables() {
+        // Create a key-value store table for compatibility with NoSQL
+        await this.exec(`
+            CREATE TABLE IF NOT EXISTS kv_store (
+                key TEXT PRIMARY KEY,
+                value TEXT,
+                type TEXT,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        `);
+
+        // Create a simple users table as an example
+        await this.exec(`
+            CREATE TABLE IF NOT EXISTS users (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL,
+                email TEXT UNIQUE,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        `);
+
+        console.log('Default SQL tables created');
+    }
+
+    async waitForReady() {
+        if (this.isReady) return;
+        await this.initPromise;
+    }
+
+    async exec(sql) {
+        await this.waitForReady();
+        if (!this.db) throw new Error('SQL database not initialized');
+        
+        try {
+            console.log('SQL exec:', sql.substring(0, 100) + (sql.length > 100 ? '...' : ''));
+            this.db.exec(sql);
+            await this.saveToGun(); // Auto-save after modifications
+            return true;
+        } catch (error) {
+            console.error('SQL exec error:', error);
+            throw new Error(`SQL Error: ${error.message}`);
+        }
+    }
+
+    async query(sql) {
+        await this.waitForReady();
+        if (!this.db) throw new Error('SQL database not initialized');
+        
+        try {
+            console.log('SQL query:', sql.substring(0, 100) + (sql.length > 100 ? '...' : ''));
+            const results = this.db.exec(sql);
+            return results;
+        } catch (error) {
+            console.error('SQL query error:', error);
+            throw new Error(`SQL Error: ${error.message}`);
+        }
+    }
+
+    async getTables() {
+        await this.waitForReady();
+        const results = await this.query("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'");
+        return results;
+    }
+
+    async getTableSchema(tableName) {
+        await this.waitForReady();
+        const results = await this.query(`PRAGMA table_info(${tableName})`);
+        return results;
+    }
+
+    // Gun.js sync methods
+    async saveToGun() {
+        try {
+            const data = this.db.export();
+            const base64Data = btoa(String.fromCharCode.apply(null, data));
+            
+            return new Promise((resolve) => {
+                gun.get('CodeMate').get(this.roomId).get('sqlDatabase').put(base64Data, (ack) => {
+                    if (ack.err) {
+                        console.warn('Failed to save SQL database to Gun.js:', ack.err);
+                    }
+                    resolve();
+                });
+            });
+        } catch (error) {
+            console.error('Error saving SQL database to Gun.js:', error);
+        }
+    }
+
+    async loadFromGun() {
+        return new Promise((resolve) => {
+            gun.get('CodeMate').get(this.roomId).get('sqlDatabase').once((data) => {
+                if (data && typeof data === 'string') {
+                    try {
+                        const binaryString = atob(data);
+                        const bytes = new Uint8Array(binaryString.length);
+                        for (let i = 0; i < binaryString.length; i++) {
+                            bytes[i] = binaryString.charCodeAt(i);
+                        }
+                        resolve(bytes);
+                    } catch (error) {
+                        console.error('Error parsing SQL database from Gun.js:', error);
+                        resolve(null);
+                    }
+                } else {
+                    resolve(null);
+                }
+            });
+        });
+    }
+
+    setupSync() {
+        // Save to Gun.js periodically and on changes
+        this.syncInterval = setInterval(() => {
+            this.saveToGun();
+        }, 30000); // Save every 30 seconds
+
+        // Listen for updates from other users
+        gun.get('CodeMate').get(this.roomId).get('sqlDatabase').on((data) => {
+            if (data && typeof data === 'string') {
+                // Only reload if the data is different
+                const currentData = btoa(String.fromCharCode.apply(null, this.db.export()));
+                if (data !== currentData) {
+                    this.reloadFromData(data);
+                }
+            }
+        });
+    }
+
+    async reloadFromData(base64Data) {
+        try {
+            const binaryString = atob(base64Data);
+            const bytes = new Uint8Array(binaryString.length);
+            for (let i = 0; i < binaryString.length; i++) {
+                bytes[i] = binaryString.charCodeAt(i);
+            }
+            
+            const SQL = await initSqlJs({
+                locateFile: file => `https://sql.js.org/dist/${file}`
+            });
+            
+            this.db = new SQL.Database(bytes);
+            console.log('SQL Database reloaded from Gun.js sync');
+            
+            // Refresh UI if SQL database is currently visible
+            if (currentDbType === 'sql' && typeof refreshDatabase === 'function') {
+                refreshDatabase().catch(console.error);
+            }
+        } catch (error) {
+            console.error('Error reloading SQL database from sync:', error);
+        }
+    }
+
+    // Compatibility methods for NoSQL-style operations
+    async set(key, value) {
+        const type = typeof value;
+        const valueStr = type === 'object' ? JSON.stringify(value) : String(value);
+        
+        await this.exec(`
+            INSERT OR REPLACE INTO kv_store (key, value, type, updated_at) 
+            VALUES ('${key}', '${valueStr.replace(/'/g, "''")}', '${type}', CURRENT_TIMESTAMP)
+        `);
+        return value;
+    }
+
+    async get(key) {
+        const results = await this.query(`SELECT value, type FROM kv_store WHERE key = '${key}'`);
+        if (results.length === 0 || results[0].values.length === 0) {
+            return null;
+        }
+        
+        const [value, type] = results[0].values[0];
+        if (type === 'object') {
+            try {
+                return JSON.parse(value);
+            } catch (e) {
+                return value;
+            }
+        } else if (type === 'number') {
+            return parseFloat(value);
+        } else if (type === 'boolean') {
+            return value === 'true';
+        }
+        return value;
+    }
+
+    async delete(key) {
+        await this.exec(`DELETE FROM kv_store WHERE key = '${key}'`);
+        return true;
+    }
+
+    async list() {
+        const results = await this.query('SELECT key, value, type FROM kv_store ORDER BY updated_at DESC');
+        const data = {};
+        
+        if (results.length > 0) {
+            results[0].values.forEach(([key, value, type]) => {
+                let parsedValue = value;
+                if (type === 'object') {
+                    try {
+                        parsedValue = JSON.parse(value);
+                    } catch (e) {
+                        parsedValue = value;
+                    }
+                } else if (type === 'number') {
+                    parsedValue = parseFloat(value);
+                } else if (type === 'boolean') {
+                    parsedValue = value === 'true';
+                }
+                
+                data[key] = {
+                    value: parsedValue,
+                    type: type,
+                    timestamp: Date.now() // Simplified for compatibility
+                };
+            });
+        }
+        
+        return data;
+    }
+
+    cleanup() {
+        if (this.syncInterval) {
+            clearInterval(this.syncInterval);
+        }
+        if (this.db) {
+            this.db.close();
+        }
+    }
+}
+
 // Initialize database for current room
 let db = null;
+let sqlDb = null;
+let currentDbType = 'nosql'; // 'nosql' or 'sql'
 
-function initializeDatabase() {
+async function initializeDatabase() {
     if (roomId) {
+        // Initialize NoSQL database (always works)
         db = new CodeMateDB(roomId);
-        
-        // Make it available globally for user scripts
         window.db = db;
+        
+        // Initialize SQL database (may fail)
+        try {
+            sqlDb = new CodeMateSQLDB(roomId);
+            window.sqlDb = sqlDb;
+            // Wait for SQL database to be ready
+            await sqlDb.waitForReady();
+            console.log('SQL database initialized successfully');
+        } catch (error) {
+            console.error('Failed to initialize SQL database:', error);
+            sqlDb = null;
+            window.sqlDb = null;
+            addToConsole('SQL database initialization failed. Only NoSQL database is available.', 'warn');
+            
+            // Hide SQL option from database type selector
+            const sqlOption = document.querySelector('#db-type-select option[value="sql"]');
+            if (sqlOption) {
+                sqlOption.disabled = true;
+                sqlOption.textContent = 'SQL (unavailable)';
+            }
+        }
         
         // Add Python database functions
         if (pyodideReady && pyodide) {
             setupPythonDatabase();
         }
         
-        console.log('Database initialized and available as window.db');
-        addToConsole('Database ready! Use db.set(), db.get(), db.list() in your code', 'info');
+        const dbTypes = sqlDb ? 'NoSQL and SQL' : 'NoSQL';
+        console.log(`Databases initialized and available as window.db (${dbTypes})`);
+        addToConsole(`Databases ready! Use db.set(), db.get() (NoSQL)${sqlDb ? ' or sqlDb.exec() (SQL)' : ''} in your code`, 'info');
     }
+}
+
+async function switchDatabaseType(type) {
+    currentDbType = type;
+    
+    // Update UI
+    const nosqlInput = document.getElementById('nosql-input');
+    const sqlInput = document.getElementById('sql-input');
+    
+    if (type === 'sql') {
+        // Check if SQL database is available
+        if (!sqlDb) {
+            showDatabaseMessage('SQL database is not available. Please check browser console for errors.', 'error');
+            // Fall back to NoSQL
+            document.getElementById('db-type-select').value = 'nosql';
+            currentDbType = 'nosql';
+            return;
+        }
+        
+        nosqlInput.classList.add('hidden');
+        sqlInput.classList.remove('hidden');
+
+        // Ensure SQL DB is ready
+        if (!sqlDb.isReady) {
+            showDatabaseMessage('Initializing SQL database...', 'info');
+            try {
+                await sqlDb.waitForReady();
+            } catch (error) {
+                showDatabaseMessage('SQL database initialization failed: ' + error.message, 'error');
+                // Fall back to NoSQL
+                document.getElementById('db-type-select').value = 'nosql';
+                currentDbType = 'nosql';
+                nosqlInput.classList.remove('hidden');
+                sqlInput.classList.add('hidden');
+                await refreshDatabase();
+                return;
+            }
+        }
+        
+        showDatabaseMessage('SQL database ready!', 'info');
+    } else {
+        sqlInput.classList.add('hidden');
+        nosqlInput.classList.remove('hidden');
+    }
+    
+    // Refresh database view
+    await refreshDatabase();
 }
 
 // Python database integration
@@ -2849,13 +3406,62 @@ db = Database()
 
 // Database terminal commands
 async function handleDatabaseCommand(command) {
-    if (!db) {
-        addToTerminal('Database not initialized', 'error');
+    const args = command.split(' ').slice(1); // Remove 'db' prefix
+    const subcommand = args[0];
+    
+    // Check if this is a SQL command
+    if (subcommand === 'sql' && args.length > 1) {
+        if (!sqlDb) {
+            addToTerminal('SQL Database not available. Check browser console for initialization errors.', 'error');
+            return;
+        }
+        
+        if (!sqlDb.isReady) {
+            addToTerminal('SQL Database not ready. Please wait for initialization to complete.', 'error');
+            return;
+        }
+        
+        const sqlQuery = args.slice(1).join(' ');
+        try {
+            const results = await sqlDb.query(sqlQuery);
+            
+            if (results.length === 0) {
+                addToTerminal('✓ SQL query executed successfully (no results)', 'info');
+            } else {
+                results.forEach((result, index) => {
+                    if (result.values && result.values.length > 0) {
+                        addToTerminal(`✓ SQL Result ${index + 1}: ${result.values.length} row(s)`, 'info');
+                        
+                        // Show column headers
+                        if (result.columns) {
+                            addToTerminal(`Columns: ${result.columns.join(', ')}`, 'log');
+                        }
+                        
+                        // Show first few rows
+                        const maxRows = 5;
+                        result.values.slice(0, maxRows).forEach((row, rowIndex) => {
+                            addToTerminal(`Row ${rowIndex + 1}: ${row.join(', ')}`, 'log');
+                        });
+                        
+                        if (result.values.length > maxRows) {
+                            addToTerminal(`... and ${result.values.length - maxRows} more rows`, 'log');
+                        }
+                    } else {
+                        addToTerminal(`✓ SQL Result ${index + 1}: Query executed successfully`, 'info');
+                    }
+                });
+            }
+        } catch (error) {
+            addToTerminal(`SQL Error: ${error.message}`, 'error');
+        }
         return;
     }
     
-    const args = command.split(' ').slice(1); // Remove 'db' prefix
-    const subcommand = args[0];
+    // Original NoSQL commands
+    if (!db) {
+        addToTerminal('NoSQL Database not initialized', 'error');
+        return;
+    }
     
     try {
         switch (subcommand) {
@@ -2914,9 +3520,9 @@ async function handleDatabaseCommand(command) {
                 const allData = await db.list();
                 const keys = Object.keys(allData);
                 if (keys.length === 0) {
-                    addToTerminal('Database is empty', 'log');
+                    addToTerminal('NoSQL Database is empty', 'log');
                 } else {
-                    addToTerminal(`Database contains ${keys.length} items:`, 'info');
+                    addToTerminal(`NoSQL Database contains ${keys.length} item${keys.length > 1 ? 's' : ''} in ${keys.length === 1 ? 'database' : 'databases'}:`, 'info');
                     keys.forEach(key => {
                         const item = allData[key];
                         const date = new Date(item.timestamp).toLocaleString();
@@ -2935,7 +3541,9 @@ async function handleDatabaseCommand(command) {
                 let pushValue = args.slice(2).join(' ');
                 
                 // Try to parse as JSON
-                if (pushValue.startsWith('{') || pushValue.startsWith('[') || pushValue === 'true' || pushValue === 'false' || !isNaN(pushValue)) {
+                if (pushValue.startsWith('{') || pushValue.startsWith('[') || 
+                    pushValue === 'true' || pushValue === 'false' || 
+                    (!isNaN(pushValue) && pushValue !== '')) {
                     try {
                         pushValue = JSON.parse(pushValue);
                     } catch (e) {
@@ -2963,15 +3571,15 @@ async function handleDatabaseCommand(command) {
                 break;
                 
             case 'clear':
-                if (confirm('Are you sure you want to clear all database data? This cannot be undone.')) {
+                if (confirm('Are you sure you want to clear all NoSQL database data? This cannot be undone.')) {
                     const allData = await db.list();
                     const keys = Object.keys(allData);
                     for (const key of keys) {
                         await db.delete(key);
                     }
-                    addToTerminal(`✓ Cleared database (${keys.length} items removed)`, 'info');
+                    addToTerminal(`✓ Cleared NoSQL database (${keys.length} items removed)`, 'info');
                 } else {
-                    addToTerminal('Database clear cancelled', 'log');
+                    addToTerminal('NoSQL database clear cancelled', 'log');
                 }
                 break;
                 
@@ -2981,7 +3589,7 @@ async function handleDatabaseCommand(command) {
                 
             default:
                 addToTerminal(`Unknown database command: ${subcommand}`, 'error');
-                addToTerminal('Available commands: set, get, delete, list, push, increment, clear, help', 'info');
+                addToTerminal('Available commands: set, get, delete, list, push, increment, clear, sql, help', 'info');
         }
     } catch (error) {
         addToTerminal(`Database error: ${error.message}`, 'error');
@@ -2991,16 +3599,21 @@ async function handleDatabaseCommand(command) {
 function showDatabaseHelp() {
     addToTerminal('CodeMate Database - Available Commands', 'info');
     addToTerminal('', 'log');
-    addToTerminal('Basic Operations:', 'info');
+    addToTerminal('NoSQL Operations (Gun.js):', 'info');
     addToTerminal('  db set <key> <value>     Store a value', 'log');
     addToTerminal('  db get <key>             Retrieve a value', 'log');
     addToTerminal('  db delete <key>          Delete a key', 'log');
     addToTerminal('  db list                  List all data', 'log');
-    addToTerminal('', 'log');
-    addToTerminal('Advanced Operations:', 'info');
     addToTerminal('  db push <key> <value>    Add to array', 'log');
     addToTerminal('  db increment <key> [n]   Increment number', 'log');
     addToTerminal('  db clear                 Clear all data', 'log');
+    addToTerminal('', 'log');
+    addToTerminal('SQL Operations (SQLite):', 'info');
+    addToTerminal('  db sql SELECT * FROM users         Run SQL query', 'log');
+    addToTerminal('  db sql CREATE TABLE ...            Create table', 'log');
+    addToTerminal('  db sql INSERT INTO ...             Insert data', 'log');
+    addToTerminal('  db sql UPDATE SET ...              Update data', 'log');
+    addToTerminal('  db sql DELETE FROM ...             Delete data', 'log');
     addToTerminal('', 'log');
     addToTerminal('Examples:', 'info');
     addToTerminal('  db set name "Alice"', 'log');
@@ -3008,17 +3621,50 @@ function showDatabaseHelp() {
     addToTerminal('  db set config {"theme": "dark"}', 'log');
     addToTerminal('  db push todos "Buy milk"', 'log');
     addToTerminal('  db increment counter 1', 'log');
+    addToTerminal('  db sql SELECT * FROM kv_store', 'log');
+    addToTerminal('  db sql INSERT INTO users (name, email) VALUES ("Bob", "bob@example.com")', 'log');
     addToTerminal('', 'log');
-    addToTerminal('Note: Database is shared across all users in this room!', 'warn');
+    addToTerminal('Note: Both databases are shared across all users in this room!', 'warn');
 }
 
 // Database Panel Functions
+function showDatabaseMessage(message, type = 'info') {
+    const statsEl = document.getElementById('database-stats');
+    if (statsEl) {
+        const icon = type === 'error' ? '❌' : type === 'warn' ? '⚠️' : 'ℹ️';
+        statsEl.innerHTML = `${icon} ${message}`;
+        statsEl.style.color = type === 'error' ? '#ff6b6b' : type === 'warn' ? '#feca57' : '#74b9ff';
+    }
+    console.log(`Database ${type}:`, message);
+}
+
+function showDatabaseError(message) {
+    showDatabaseMessage(message, 'error');
+    const tableEl = document.getElementById('database-table');
+    if (tableEl) {
+        tableEl.innerHTML = `
+            <div class="database-empty">
+                <div class="database-empty-icon">❌</div>
+                <div style="color: #ff6b6b;">${message}</div>
+            </div>
+        `;
+    }
+}
+
 async function refreshDatabase() {
+    if (currentDbType === 'sql') {
+        await refreshSQLDatabase();
+    } else {
+        await refreshNoSQLDatabase();
+    }
+}
+
+async function refreshNoSQLDatabase() {
     if (!db) {
-        showDatabaseError('Database not initialized');
+        showDatabaseError('NoSQL Database not initialized');
         return;
     }
-    
+
     try {
         const allData = await db.list();
         const keys = Object.keys(allData);
@@ -3026,9 +3672,9 @@ async function refreshDatabase() {
         // Update stats
         const statsEl = document.getElementById('database-stats');
         if (keys.length === 0) {
-            statsEl.innerHTML = 'Database is empty';
+            statsEl.innerHTML = 'NoSQL Database is empty';
         } else {
-            statsEl.innerHTML = `${keys.length} item${keys.length > 1 ? 's' : ''} in database | Last updated: ${new Date().toLocaleTimeString()}`;
+            statsEl.innerHTML = `${keys.length} item${keys.length > 1 ? 's' : ''} in NoSQL database | Last updated: ${new Date().toLocaleTimeString()}`;
         }
         
         // Update table
@@ -3037,7 +3683,7 @@ async function refreshDatabase() {
             tableEl.innerHTML = `
                 <div class="database-empty">
                     <div class="database-empty-icon">🗃️</div>
-                    <div>No data in database</div>
+                    <div>No data in NoSQL database</div>
                     <div style="margin-top: 8px; font-size: 11px;">Add some data using the input below or terminal commands</div>
                 </div>
             `;
@@ -3050,9 +3696,66 @@ async function refreshDatabase() {
             tableEl.innerHTML = entries;
         }
         
-        console.log('Database panel refreshed:', keys.length, 'items');
+        console.log('NoSQL Database panel refreshed:', keys.length, 'items');
     } catch (error) {
-        showDatabaseError('Failed to load database: ' + error.message);
+        showDatabaseError('Failed to load NoSQL database: ' + error.message);
+    }
+}
+
+async function refreshSQLDatabase() {
+    if (!sqlDb || !sqlDb.isReady) {
+        showDatabaseError('SQL Database not ready');
+        return;
+    }
+
+    try {
+        // Get database schema
+        const tables = await sqlDb.getTables();
+        
+        // Update stats
+        const statsEl = document.getElementById('database-stats');
+        statsEl.innerHTML = `SQL Database | ${tables.length} table${tables.length !== 1 ? 's' : ''} | Last updated: ${new Date().toLocaleTimeString()}`;
+        
+        // Update table view
+        const tableEl = document.getElementById('database-table');
+        
+        if (tables.length === 0) {
+            tableEl.innerHTML = `
+                <div class="database-empty">
+                    <div class="database-empty-icon">🗄️</div>
+                    <div>No tables in SQL database</div>
+                    <div style="margin-top: 8px; font-size: 11px;">Execute SQL queries to create tables and insert data</div>
+                </div>
+            `;
+        } else {
+            let html = '<div class="sql-schema-viewer">';
+            html += '<h4 style="margin-bottom: 10px; color: #cccccc;">Database Schema:</h4>';
+            
+            for (const table of tables) {
+                html += `<div class="sql-schema-table" onclick="showTableData('${table}')">${table}</div>`;
+            }
+            
+            html += '</div>';
+            
+            // Show recent data from kv_store table if it exists
+            if (tables.includes('kv_store')) {
+                try {
+                    const results = await sqlDb.query('SELECT * FROM kv_store ORDER BY updated_at DESC LIMIT 10');
+                    if (results.length > 0 && results[0].values.length > 0) {
+                        html += '<h4 style="margin: 10px 0; color: #cccccc;">Recent Key-Value Data:</h4>';
+                        html += createSQLTableHTML(results[0]);
+                    }
+                } catch (e) {
+                    console.warn('Could not load kv_store data:', e);
+                }
+            }
+            
+            tableEl.innerHTML = html;
+        }
+        
+        console.log('SQL Database panel refreshed:', tables.length, 'tables');
+    } catch (error) {
+        showDatabaseError('Failed to load SQL database: ' + error.message);
     }
 }
 
@@ -3100,7 +3803,129 @@ function createDatabaseEntryHTML(key, item) {
     `;
 }
 
+function createSQLTableHTML(result) {
+    if (!result || !result.columns || !result.values) {
+        return '<div>No data</div>';
+    }
+    
+    let html = '<table class="sql-table">';
+    
+    // Header
+    html += '<thead><tr>';
+    result.columns.forEach(col => {
+        html += `<th>${col}</th>`;
+    });
+    html += '</tr></thead>';
+    
+    // Body
+    html += '<tbody>';
+    result.values.forEach(row => {
+        html += '<tr>';
+        row.forEach(cell => {
+            const cellValue = cell === null ? '<em>NULL</em>' : String(cell);
+            html += `<td title="${cellValue}">${cellValue}</td>`;
+        });
+        html += '</tr>';
+    });
+    html += '</tbody>';
+    
+    html += '</table>';
+    return html;
+}
+
+async function showTableData(tableName) {
+    if (!sqlDb || !sqlDb.isReady) {
+        alert('SQL database not ready');
+        return;
+    }
+    
+    try {
+        const results = await sqlDb.query(`SELECT * FROM ${tableName} LIMIT 100`);
+        const tableEl = document.getElementById('database-table');
+        
+        if (results.length === 0 || results[0].values.length === 0) {
+            tableEl.innerHTML = `<div class="database-empty">
+                <div class="database-empty-icon">📭</div>
+                <div>Table "${tableName}" is empty</div>
+            </div>`;
+        } else {
+            let html = `<h4 style="margin-bottom: 10px; color: #cccccc;">Table: ${tableName}</h4>`;
+            html += createSQLTableHTML(results[0]);
+            html += '<br><button onclick="refreshSQLDatabase()" style="background: #3e3e42; color: #cccccc; border: none; padding: 4px 8px; border-radius: 3px; cursor: pointer;">← Back to Schema</button>';
+            tableEl.innerHTML = html;
+        }
+    } catch (error) {
+        alert('Error loading table data: ' + error.message);
+    }
+}
+
+async function executeSQLQuery() {
+    const input = document.getElementById('sql-query-input');
+    const query = input.value.trim();
+    
+    if (!query) {
+        alert('Please enter a SQL query');
+        input.focus();
+        return;
+    }
+    
+    if (!sqlDb || !sqlDb.isReady) {
+        alert('SQL database not ready');
+        return;
+    }
+    
+    try {
+        const results = await sqlDb.query(query);
+        
+        // Show results
+        const tableEl = document.getElementById('database-table');
+        let html = '<div class="sql-query-result sql-query-success">';
+        html += `<strong>Query:</strong> ${query}<br><br>`;
+        
+        if (results.length === 0) {
+            html += '<em>Query executed successfully (no results returned)</em>';
+        } else {
+            results.forEach((result, index) => {
+                if (index > 0) html += '<br><br>';
+                
+                if (result.values && result.values.length > 0) {
+                    html += `<strong>Result ${index + 1}:</strong> ${result.values.length} row(s)<br>`;
+                    html += createSQLTableHTML(result);
+                } else {
+                    html += `<strong>Result ${index + 1}:</strong> Query executed successfully`;
+                }
+            });
+        }
+        
+        html += '</div>';
+        tableEl.innerHTML = html;
+        
+        // Clear input
+        input.value = '';
+        
+        console.log('SQL query executed successfully:', query);
+        
+    } catch (error) {
+        // Show error
+        const tableEl = document.getElementById('database-table');
+        tableEl.innerHTML = `
+            <div class="sql-query-result sql-query-error">
+                <strong>Query:</strong> ${query}<br><br>
+                <strong>Error:</strong> ${error.message}
+            </div>
+        `;
+        console.error('SQL query error:', error);
+    }
+}
+
 async function addDatabaseEntry() {
+    if (currentDbType === 'sql') {
+        // For SQL, execute the query directly
+        await executeSQLQuery();
+        return;
+    }
+    
+    // NoSQL entry addition
     const keyInput = document.getElementById('database-key-input');
     const valueInput = document.getElementById('database-value-input');
     
@@ -3150,6 +3975,14 @@ async function addDatabaseEntry() {
 }
 
 async function editDatabaseEntry(key) {
+    if (currentDbType === 'sql') {
+        // For SQL, provide a delete query template
+        const queryInput = document.getElementById('sql-query-input');
+        queryInput.value = `UPDATE kv_store SET value = 'new_value' WHERE key = '${key}';`;
+        queryInput.focus();
+        return;
+    }
+    
     try {
         const currentValue = await db.get(key);
         let valueStr;
@@ -3181,7 +4014,6 @@ async function editDatabaseEntry(key) {
         
         await db.set(key, newValue);
         await refreshDatabase();
-        
         console.log('Updated database entry:', key, '=', newValue);
     } catch (error) {
         alert('Failed to edit entry: ' + error.message);
@@ -3189,6 +4021,14 @@ async function editDatabaseEntry(key) {
 }
 
 async function deleteDatabaseEntry(key) {
+    if (currentDbType === 'sql') {
+        // For SQL, provide a delete query template
+        const queryInput = document.getElementById('sql-query-input');
+        queryInput.value = `DELETE FROM kv_store WHERE key = '${key}';`;
+        queryInput.focus();
+        return;
+    }
+    
     if (confirm(`Are you sure you want to delete "${key}"?`)) {
         try {
             await db.delete(key);
@@ -3201,7 +4041,26 @@ async function deleteDatabaseEntry(key) {
 }
 
 async function clearDatabase() {
-    if (confirm('Are you sure you want to clear ALL database data? This cannot be undone.')) {
+    if (currentDbType === 'sql') {
+        if (confirm('Are you sure you want to clear ALL SQL database data? This cannot be undone.')) {
+            try {
+                const tables = await sqlDb.getTables();
+                for (const table of tables) {
+                    await sqlDb.exec(`DROP TABLE IF EXISTS ${table}`);
+                }
+                
+                // Recreate default tables
+                await sqlDb.createDefaultTables();
+                await refreshDatabase();
+                console.log('Cleared SQL database');
+            } catch (error) {
+                alert('Failed to clear SQL database: ' + error.message);
+            }
+        }
+        return;
+    }
+    
+    if (confirm('Are you sure you want to clear ALL NoSQL database data? This cannot be undone.')) {
         try {
             const allData = await db.list();
             const keys = Object.keys(allData);
@@ -3211,33 +4070,29 @@ async function clearDatabase() {
             }
             
             await refreshDatabase();
-            console.log('Cleared database:', keys.length, 'items removed');
+            console.log('Cleared NoSQL database:', keys.length, 'items removed');
         } catch (error) {
-            alert('Failed to clear database: ' + error.message);
+            alert('Failed to clear NoSQL database: ' + error.message);
         }
     }
 }
 
 function showAddDataModal() {
-    const keyInput = document.getElementById('database-key-input');
-    keyInput.focus();
-}
-
-function showDatabaseError(message) {
-    const statsEl = document.getElementById('database-stats');
-    const tableEl = document.getElementById('database-table');
-    
-    statsEl.innerHTML = '<span style="color: #e57373;">Error: ' + message + '</span>';
-    tableEl.innerHTML = '<div class="database-empty">' +
-        '<div class="database-empty-icon">⚠️</div>' +
-        '<div style="color: #e57373;">' + message + '</div>' +
-        '</div>';
+    if (currentDbType === 'sql') {
+        const queryInput = document.getElementById('sql-query-input');
+        queryInput.value = 'INSERT INTO kv_store (key, value, type) VALUES (\'example_key\', \'example_value\', \'string\');';
+        queryInput.focus();
+    } else {
+        const keyInput = document.getElementById('database-key-input');
+        keyInput.focus();
+    }
 }
 
 // Handle Enter key in database inputs
 document.addEventListener('DOMContentLoaded', function() {
     const keyInput = document.getElementById('database-key-input');
     const valueInput = document.getElementById('database-value-input');
+    const sqlInput = document.getElementById('sql-query-input');
     
     if (keyInput && valueInput) {
         keyInput.addEventListener('keypress', function(e) {
@@ -3249,6 +4104,14 @@ document.addEventListener('DOMContentLoaded', function() {
         valueInput.addEventListener('keypress', function(e) {
             if (e.key === 'Enter') {
                 addDatabaseEntry();
+            }
+        });
+    }
+    
+    if (sqlInput) {
+        sqlInput.addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
+                executeSQLQuery();
             }
         });
     }
