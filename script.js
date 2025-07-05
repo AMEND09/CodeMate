@@ -2965,149 +2965,138 @@ class CodeMateDB {
 }
 
 // SQL Database functionality using SQL.js
+// SQL Database functionality using SQL.js
 class CodeMateSQLDB {
     constructor(roomId) {
         this.roomId = roomId;
-        this.db = null;
+        // The path to the worker file. Adjust if you place it in a subdirectory.
+        this.worker = new Worker('worker.sql-wasm.js');
         this.isReady = false;
-        this.initPromise = this.initialize();
-        console.log('CodeMateSQLDB initializing for room:', roomId);
+        this.commandQueue = new Map();
+        this.commandCounter = 0;
+
+        // The promise that resolves when the database is fully initialized.
+        this.initPromise = this.initialize(); 
+        
+        console.log('CodeMateSQLDB worker created for room:', roomId);
     }
 
     async initialize() {
-        try {
-            // Wait for SQL.js to be loaded
-            if (typeof initSqlJs === 'undefined') {
-                console.log('Waiting for SQL.js to load...');
-                let attempts = 0;
-                while (typeof initSqlJs === 'undefined' && attempts < 100) {
-                    await new Promise(resolve => setTimeout(resolve, 100));
-                    attempts++;
+        return new Promise(async (resolve, reject) => {
+            // Central handler for all messages from the worker
+            this.worker.onmessage = (event) => {
+                const { id, error, results, ready, data } = event.data;
+                const pendingCommand = this.commandQueue.get(id);
+
+                if (pendingCommand) {
+                    if (error) {
+                        pendingCommand.reject(new Error(error));
+                    } else {
+                        pendingCommand.resolve(results || data);
+                    }
+                    this.commandQueue.delete(id);
+                } else if (ready) {
+                    // This is the initial "ready" signal from the worker
+                    console.log('SQL.js worker is ready.');
+                    this.isReady = true;
+                    resolve(); // Resolve the main initialization promise
                 }
-                
-                if (typeof initSqlJs === 'undefined') {
-                    throw new Error('SQL.js failed to load after timeout');
-                }
+            };
+            
+            this.worker.onerror = (e) => {
+                console.error("Error from SQL worker:", e);
+                // Reject any pending commands
+                this.commandQueue.forEach(cmd => cmd.reject(new Error(e.message)));
+                this.commandQueue.clear();
+                reject(e); // Reject the main initialization promise
+            };
+
+            // 1. Load existing database from Gun.js first
+            const dbData = await this.loadFromGun();
+
+            // 2. Send the 'open' command to the worker with the loaded data (or null)
+            const openResult = await this._sendCommand('open', { buffer: dbData });
+            if (!openResult) { // This will be true on successful open
+                 console.log(dbData ? 'SQL Database restored from Gun.js' : 'New SQL Database created');
             }
 
-            console.log('SQL.js found, initializing...');
-
-            // Initialize SQL.js
-            const SQL = await initSqlJs({
-                // Use CDN version
-                locateFile: file => `https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.8.0/${file}`
-            });
-
-            console.log('SQL.js initialized successfully');
-
-            // Create or restore database
-            const savedData = await this.loadFromGun();
-            if (savedData) {
-                this.db = new SQL.Database(new Uint8Array(savedData));
-                console.log('SQL Database restored from Gun.js');
-            } else {
-                this.db = new SQL.Database();
-                console.log('New SQL Database created');
+            // 3. Create default tables if it's a new DB
+            if (!dbData) {
                 await this.createDefaultTables();
             }
 
-            this.isReady = true;
-            console.log('SQL Database ready for room:', this.roomId);
-            
-            // Setup periodic sync to Gun.js
+            // 4. Set up the real-time sync listener
             this.setupSync();
-            
-        } catch (error) {
-            console.error('Failed to initialize SQL database:', error);
-            this.isReady = false;
-            throw error;
-        }
+        });
+    }
+
+    // A private helper to send commands to the worker and get a promise back
+    _sendCommand(action, payload = {}) {
+        return new Promise((resolve, reject) => {
+            const id = this.commandCounter++;
+            this.commandQueue.set(id, { resolve, reject });
+            this.worker.postMessage({ id, action, ...payload });
+        });
     }
 
     async createDefaultTables() {
-        // Create a key-value store table for compatibility with NoSQL
         await this.exec(`
             CREATE TABLE IF NOT EXISTS kv_store (
                 key TEXT PRIMARY KEY,
                 value TEXT,
                 type TEXT,
-                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
                 updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
-            )
+            );
+            CREATE TRIGGER IF NOT EXISTS update_kv_store_updated_at
+            AFTER UPDATE ON kv_store FOR EACH ROW
+            BEGIN
+                UPDATE kv_store SET updated_at = CURRENT_TIMESTAMP WHERE key = OLD.key;
+            END;
         `);
-
-        // Create a simple users table as an example
-        await this.exec(`
-            CREATE TABLE IF NOT EXISTS users (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                name TEXT NOT NULL,
-                email TEXT UNIQUE,
-                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-            )
-        `);
-
         console.log('Default SQL tables created');
     }
 
     async waitForReady() {
-        if (this.isReady) return;
         await this.initPromise;
     }
-
+    
+    // For executing raw SQL from the terminal/UI
     async exec(sql) {
         await this.waitForReady();
-        if (!this.db) throw new Error('SQL database not initialized');
-        
-        try {
-            console.log('SQL exec:', sql.substring(0, 100) + (sql.length > 100 ? '...' : ''));
-            this.db.exec(sql);
-            await this.saveToGun(); // Auto-save after modifications
-            return true;
-        } catch (error) {
-            console.error('SQL exec error:', error);
-            throw new Error(`SQL Error: ${error.message}`);
-        }
+        const results = await this._sendCommand('exec', { sql });
+        // After any modification, export the DB and save it
+        const dbData = await this._sendCommand('export');
+        await this.saveToGun(dbData);
+        return results;
     }
 
+    // For running SELECT queries
     async query(sql) {
         await this.waitForReady();
-        if (!this.db) throw new Error('SQL database not initialized');
-        
-        try {
-            console.log('SQL query:', sql.substring(0, 100) + (sql.length > 100 ? '...' : ''));
-            const results = this.db.exec(sql);
-            return results;
-        } catch (error) {
-            console.error('SQL query error:', error);
-            throw new Error(`SQL Error: ${error.message}`);
-        }
+        // The worker's 'exec' action handles both queries and commands
+        return this._sendCommand('exec', { sql });
     }
 
     async getTables() {
         await this.waitForReady();
-        const results = await this.query("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'");
-        return results;
+        const results = await this.query("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%';");
+        if (results && results.length > 0 && results[0].values) {
+            return results[0].values.flat(); // Return a simple array of table names
+        }
+        return [];
     }
-
-    async getTableSchema(tableName) {
-        await this.waitForReady();
-        const results = await this.query(`PRAGMA table_info(${tableName})`);
-        return results;
-    }
-
-    // Gun.js sync methods
-    async saveToGun() {
+    
+    // --- Gun.js Sync Methods ---
+    async saveToGun(data) {
+        if (!data) return;
         try {
-            const data = this.db.export();
+            // A robust way to convert Uint8Array to a Base64 string
             const base64Data = btoa(String.fromCharCode.apply(null, data));
             
-            return new Promise((resolve) => {
-                gun.get('CodeMate').get(this.roomId).get('sqlDatabase').put(base64Data, (ack) => {
-                    if (ack.err) {
-                        console.warn('Failed to save SQL database to Gun.js:', ack.err);
-                    }
-                    resolve();
-                });
+            gun.get('CodeMate').get(this.roomId).get('sqlDatabase').put(base64Data, (ack) => {
+                if (ack.err) {
+                    console.warn('Failed to save SQL database to Gun.js:', ack.err);
+                }
             });
         } catch (error) {
             console.error('Error saving SQL database to Gun.js:', error);
@@ -3125,8 +3114,8 @@ class CodeMateSQLDB {
                             bytes[i] = binaryString.charCodeAt(i);
                         }
                         resolve(bytes);
-                    } catch (error) {
-                        console.error('Error parsing SQL database from Gun.js:', error);
+                    } catch (e) {
+                        console.error('Error parsing SQL db from Gun.js:', e);
                         resolve(null);
                     }
                 } else {
@@ -3137,18 +3126,14 @@ class CodeMateSQLDB {
     }
 
     setupSync() {
-        // Save to Gun.js periodically and on changes
-        this.syncInterval = setInterval(() => {
-            this.saveToGun();
-        }, 30000); // Save every 30 seconds
-
-        // Listen for updates from other users
-        gun.get('CodeMate').get(this.roomId).get('sqlDatabase').on((data) => {
+        gun.get('CodeMate').get(this.roomId).get('sqlDatabase').on(async (data) => {
             if (data && typeof data === 'string') {
-                // Only reload if the data is different
-                const currentData = btoa(String.fromCharCode.apply(null, this.db.export()));
-                if (data !== currentData) {
-                    this.reloadFromData(data);
+                const currentDataExport = await this._sendCommand('export');
+                const currentBase64 = currentDataExport ? btoa(String.fromCharCode.apply(null, currentDataExport)) : null;
+
+                if (data !== currentBase64) {
+                    console.log("Remote change detected in SQL database. Reloading...");
+                    await this.reloadFromData(data);
                 }
             }
         });
@@ -3158,51 +3143,51 @@ class CodeMateSQLDB {
         try {
             const binaryString = atob(base64Data);
             const bytes = new Uint8Array(binaryString.length);
-            for (let i = 0; i < binaryString.length; i++) {
-                bytes[i] = binaryString.charCodeAt(i);
-            }
             
-            const SQL = await initSqlJs({
-                locateFile: file => `https://sql.js.org/dist/${file}`
-            });
-            
-            this.db = new SQL.Database(bytes);
+            // Send the 'open' command with the new data buffer
+            await this._sendCommand('open', { buffer: bytes });
             console.log('SQL Database reloaded from Gun.js sync');
             
-            // Refresh UI if SQL database is currently visible
-            if (currentDbType === 'sql' && typeof refreshDatabase === 'function') {
-                refreshDatabase().catch(console.error);
+            // Refresh UI if the database panel is active
+            if (window.currentDbType === 'sql' && typeof window.refreshDatabase === 'function') {
+                window.refreshDatabase().catch(console.error);
             }
         } catch (error) {
             console.error('Error reloading SQL database from sync:', error);
         }
     }
 
-    // Compatibility methods for NoSQL-style operations
+    // --- Secure, Parameterized Compatibility Methods ---
     async set(key, value) {
+        await this.waitForReady();
         const type = typeof value;
-        const valueStr = type === 'object' ? JSON.stringify(value) : String(value);
+        const valueStr = (type === 'object') ? JSON.stringify(value) : String(value);
+
+        const sql = `
+            INSERT INTO kv_store (key, value, type) VALUES (:key, :value, :type)
+            ON CONFLICT(key) DO UPDATE SET value=excluded.value, type=excluded.type, updated_at=CURRENT_TIMESTAMP`;
         
-        await this.exec(`
-            INSERT OR REPLACE INTO kv_store (key, value, type, updated_at) 
-            VALUES ('${key}', '${valueStr.replace(/'/g, "''")}', '${type}', CURRENT_TIMESTAMP)
-        `);
+        // Send the command with parameters to the worker for safe execution
+        await this._sendCommand('exec', { sql, params: { ':key': key, ':value': valueStr, ':type': type } });
+
+        // Save to Gun.js after successful modification
+        const dbData = await this._sendCommand('export');
+        await this.saveToGun(dbData);
         return value;
     }
 
     async get(key) {
-        const results = await this.query(`SELECT value, type FROM kv_store WHERE key = '${key}'`);
-        if (results.length === 0 || results[0].values.length === 0) {
+        await this.waitForReady();
+        const sql = "SELECT value, type FROM kv_store WHERE key = :key";
+        const results = await this._sendCommand('exec', { sql, params: { ':key': key } });
+
+        if (!results || results.length === 0 || !results[0].values || results[0].values.length === 0) {
             return null;
         }
-        
+
         const [value, type] = results[0].values[0];
         if (type === 'object') {
-            try {
-                return JSON.parse(value);
-            } catch (e) {
-                return value;
-            }
+            try { return JSON.parse(value); } catch (e) { return value; }
         } else if (type === 'number') {
             return parseFloat(value);
         } else if (type === 'boolean') {
@@ -3212,47 +3197,42 @@ class CodeMateSQLDB {
     }
 
     async delete(key) {
-        await this.exec(`DELETE FROM kv_store WHERE key = '${key}'`);
+        await this.waitForReady();
+        const sql = "DELETE FROM kv_store WHERE key = :key";
+        await this._sendCommand('exec', { sql, params: { ':key': key } });
+        
+        const dbData = await this._sendCommand('export');
+        await this.saveToGun(dbData);
         return true;
     }
 
     async list() {
-        const results = await this.query('SELECT key, value, type FROM kv_store ORDER BY updated_at DESC');
+        await this.waitForReady();
+        const results = await this.query("SELECT key, value, type, updated_at FROM kv_store ORDER BY updated_at DESC");
         const data = {};
         
-        if (results.length > 0) {
-            results[0].values.forEach(([key, value, type]) => {
+        if (results && results.length > 0 && results[0].values) {
+            results[0].values.forEach(([key, value, type, timestamp]) => {
                 let parsedValue = value;
                 if (type === 'object') {
-                    try {
-                        parsedValue = JSON.parse(value);
-                    } catch (e) {
-                        parsedValue = value;
-                    }
+                    try { parsedValue = JSON.parse(value); } catch (e) {}
                 } else if (type === 'number') {
                     parsedValue = parseFloat(value);
                 } else if (type === 'boolean') {
                     parsedValue = value === 'true';
                 }
                 
-                data[key] = {
-                    value: parsedValue,
-                    type: type,
-                    timestamp: Date.now() // Simplified for compatibility
-                };
+                data[key] = { value: parsedValue, type, timestamp: new Date(timestamp).getTime() };
             });
         }
-        
         return data;
     }
 
     cleanup() {
-        if (this.syncInterval) {
-            clearInterval(this.syncInterval);
+        if (this.worker) {
+            this.worker.terminate();
         }
-        if (this.db) {
-            this.db.close();
-        }
+        gun.get('CodeMate').get(this.roomId).get('sqlDatabase').off();
     }
 }
 
